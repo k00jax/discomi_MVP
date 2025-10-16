@@ -14,7 +14,7 @@ const OMI_SIGNING_SECRET = process.env.OMI_SIGNING_SECRET || "";
 // ---------- Branding ----------
 const OMI_ICON = process.env.NEXT_PUBLIC_OMI_ICON_URL || "https://i.imgur.com/6WZ1Q8j.png";
 const BOT_NAME = process.env.NEXT_PUBLIC_BOT_NAME || "DiscOmi";
-const BOT_AVATAR = process.env.NEXT_PUBLIC_BOT_AVATAR_URL || OMI_ICON;
+const BOT_AVATAR = process.env.NEXT_PUBLIC_BOT_AVATAR_URL || "https://discomi-mvp-ochre.vercel.app/discomi.png";
 
 // ---------- Category mapping ----------
 const CAT_EMOJI: Record<string, string> = { 

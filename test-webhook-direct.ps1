@@ -6,6 +6,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Ensure UTF-8 encoding for PowerShell requests
+$PSDefaultParameterValues['*:Encoding'] = 'utf8'
+
 # Build webhook URL
 $webhookUrl = "$Url/api/webhook?token=$([uri]::EscapeDataString($Token))&uid=$([uri]::EscapeDataString($Uid))"
 
@@ -17,7 +20,7 @@ $payload = @{
   created_at = (Get-Date).ToUniversalTime().ToString("o")
   structured = @{
     title    = "DiscOmi Self-Test"
-    overview = "This payload bypasses Omi to prove the Supabase → Discord pipeline works."
+    overview = "This payload bypasses Omi to prove the Supabase to Discord pipeline works."
     category = "idea"
   }
 } | ConvertTo-Json -Depth 8
