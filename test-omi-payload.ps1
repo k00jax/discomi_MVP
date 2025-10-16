@@ -1,11 +1,12 @@
 param(
-  [Parameter(Mandatory=$true)][string]$Token
+  [Parameter(Mandatory=$true)][string]$Token,
+  [string]$Uid = "test-user"
 )
 
 $ErrorActionPreference = "Stop"
 
 # Config
-$URL = "https://discomi-mvp-ochre.vercel.app/api/webhook?token=$Token"
+$URL = "https://discomi-mvp-ochre.vercel.app/api/webhook?token=$Token&uid=$Uid"
 Write-Host "POST -> $URL" -ForegroundColor Cyan
 
 # Sample Omi-like payload
