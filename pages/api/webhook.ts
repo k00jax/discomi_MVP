@@ -207,7 +207,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       .from("user_configs")
       .select("webhook_url, token, options")
       .eq("uid", uid)
-      .single();
+      .single<UserConfig>();
 
     if (error) return res.status(500).send("db_error");
     if (!cfg) return res.status(403).send("setup_required");

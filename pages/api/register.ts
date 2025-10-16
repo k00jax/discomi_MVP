@@ -20,7 +20,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     },
   };
 
-  const { error } = await supabaseAdmin.from("user_configs").upsert(upsert, { onConflict: "uid" });
+  const { error } = await supabaseAdmin
+    .from("user_configs")
+    .upsert<UserConfig>(upsert, { onConflict: "uid" });
   if (error) return res.status(500).send("db_error");
 
   const base = process.env.NEXT_PUBLIC_BASE_URL || `https://${req.headers.host}`;
