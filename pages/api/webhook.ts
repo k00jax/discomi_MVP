@@ -184,6 +184,24 @@ function toDiscordPayloadOmi(rawBody: unknown, uid?: string) {
   };
 }
 
+// Helper to extract uid from query or body
+function pickUid(query: NextApiRequest["query"], body: unknown): string | undefined {
+  // First try query string (Omi appends ?uid=...)
+  if (typeof query.uid === "string" && query.uid.trim()) {
+    return query.uid.trim();
+  }
+  
+  // Fallback: look in body
+  const b = asRec(body);
+  return (
+    str(b["uid"]) ||
+    str(asRec(b["user"])["id"]) ||
+    str(asRec(b["account"])["id"]) ||
+    str(b["user_id"]) ||
+    str(b["userId"])
+  );
+}
+
 // ---------- Handler ----------
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   // Advertise accepted methods; allow health checks
@@ -198,28 +216,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const raw = await readRawBody(req);
     const ct  = String(req.headers["content-type"] || "");
 
-    // Multi-tenant safeguards: require uid and token
-    const uid = typeof req.query.uid === "string" ? req.query.uid : "";
-    if (!uid) return res.status(400).send("missing_uid");
-
-    // Look up per-user config from Supabase
-    const { data: cfg, error } = await supabaseAdmin
-      .from("user_configs")
-      .select("webhook_url, token, options")
-      .eq("uid", uid)
-      .single<UserConfig>();
-
-    if (error) return res.status(500).send("db_error");
-    if (!cfg) return res.status(403).send("setup_required");
-
-    // Check per-user token
-    if (String(req.query.token || "") !== cfg.token) return res.status(401).send("unauthorized");
-
-    // Optional: verify signature over raw if you set OMI_SIGNING_SECRET
-    if (!verifySignature(req, raw)) return res.status(401).send("invalid_signature");
-    if (!cfg.webhook_url) return res.status(500).send("missing_webhook");
-
-    // Parse flexibly:
+    // Parse body early so we can extract uid from it if needed
     let bodyUnknown: unknown = raw;
 
     if (ct.includes("application/json")) {
@@ -236,15 +233,38 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         bodyUnknown = Object.fromEntries(params.entries());
       }
     } else if (ct.includes("multipart/form-data")) {
-      // naive multipart peek: try to find JSON-looking chunk
       const m = raw.match(/\{[\s\S]*\}/);
       bodyUnknown = m ? safeJsonParse(m[0]) : raw;
     } else if (ct.includes("text/plain")) {
       bodyUnknown = safeJsonParse(raw);
     } else {
-      // unknown type; try JSON first
       bodyUnknown = safeJsonParse(raw);
     }
+
+    // Multi-tenant safeguards: require uid from query or body
+    const uid = pickUid(req.query, bodyUnknown);
+    if (!uid) return res.status(400).send("missing_uid");
+
+    // Verify Omi signature (uses OMI_SIGNING_SECRET and x-omi-signature header)
+    const signed = verifySignature(req, raw);
+
+    // Look up per-user config from Supabase
+    const { data: cfg, error } = await supabaseAdmin
+      .from("user_configs")
+      .select("webhook_url, token, options")
+      .eq("uid", uid)
+      .single<UserConfig>();
+
+    if (error) return res.status(500).send("db_error");
+    if (!cfg) return res.status(403).send("setup_required");
+
+    // If NOT an Omi-signed request, enforce per-user token for manual tests
+    if (!signed) {
+      if (String(req.query.token || "") !== cfg.token) {
+        return res.status(401).send("unauthorized");
+      }
+    }
+    if (!cfg.webhook_url) return res.status(500).send("missing_webhook");
 
     // Log build and parsed keys for debugging
     console.log("[DiscOmi] build", BUILD_ID, "keys:", typeof bodyUnknown === "object" && bodyUnknown ? Object.keys(bodyUnknown as UnknownRec) : "(not object)");
