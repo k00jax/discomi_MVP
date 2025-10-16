@@ -3,6 +3,7 @@ import crypto from "crypto";
 
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL!;
 const OMI_SIGNING_SECRET = process.env.OMI_SIGNING_SECRET || "";
+const WEBHOOK_TOKEN = process.env.WEBHOOK_TOKEN || "";
 
 // ---- Types for the Omi webhook body ----
 type OmiUser = { name?: string };
@@ -71,6 +72,13 @@ function toDiscordPayload(body: OmiPayload) {
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") return res.status(405).send("method_not_allowed");
+
+  // Simple query-token auth (Step B)
+  const token = (req.query.token as string | undefined) ?? "";
+  if (!WEBHOOK_TOKEN || token !== WEBHOOK_TOKEN) {
+    return res.status(401).send("unauthorized");
+  }
+
   try {
     // Using parsed JSON; switch to raw bytes only if Omi requires exact-byte HMAC
     const raw = JSON.stringify(req.body ?? {});
