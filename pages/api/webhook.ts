@@ -2,6 +2,8 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import crypto from "crypto";
 import { Readable } from "stream";
 
+const BUILD_ID = "discOmi-omi-extractor-001";
+
 // ---------- ENV ----------
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL!;
 const OMI_SIGNING_SECRET = process.env.OMI_SIGNING_SECRET || "";
@@ -167,11 +169,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       bodyUnknown = safeJsonParse(raw);
     }
 
+    // Log parsed keys for debugging
+    try {
+      const keys = typeof bodyUnknown === "object" && bodyUnknown ? Object.keys(bodyUnknown as any) : [];
+      console.log("[DiscOmi] keys:", keys);
+    } catch {}
+
     // Extract uid from query params if present (Omi appends ?uid=...)
     const uid = typeof req.query?.uid === "string" ? req.query.uid : undefined;
     const discordPayload = toDiscordPayloadOmi(bodyUnknown as unknown, uid);
 
-    // Force visible debug for one run to see what's being parsed
+    // Force visible debug stamps to verify correct build/extractor
+    (discordPayload.embeds[0].fields ||= []).push(
+      { name: "Debug-Build", value: BUILD_ID },
+      { name: "Debug-Extractor", value: "toDiscordPayloadOmi" }
+    );
+
+    // Additional debug for structured payload
     const b = (typeof bodyUnknown === "object" && bodyUnknown) ? (bodyUnknown as Record<string, unknown>) : {};
     const hasStructured = Object.prototype.hasOwnProperty.call(b, "structured");
     const keys = Object.keys(b).slice(0, 20).join(", ");
@@ -192,7 +206,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       console.error("Discord error:", r.status, err);
       return res.status(502).send("discord_error");
     }
-    return res.status(200).send("ok");
+    return res.status(200).send(`ok:${BUILD_ID}`);
   } catch (e) {
     console.error(e);
     return res.status(500).send("server_error");
