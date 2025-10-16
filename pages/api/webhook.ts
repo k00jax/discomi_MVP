@@ -2,19 +2,14 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import crypto from "crypto";
 import { Readable } from "stream";
 
-const BUILD_ID = "discOmi-omi-extractor-002";
+// ---------- Next config: read raw bytes ourselves ----------
+export const config = { api: { bodyParser: false } };
+const BUILD_ID = process.env.BUILD_ID || "unknown";
 
 // ---------- ENV ----------
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL!;
 const OMI_SIGNING_SECRET = process.env.OMI_SIGNING_SECRET || "";
 const WEBHOOK_TOKEN = process.env.WEBHOOK_TOKEN || "";
-
-// ---------- Next config: read raw bytes ourselves ----------
-export const config = {
-  api: {
-    bodyParser: false, // critical: we handle raw body for any content-type
-  },
-};
 
 // ---------- Utils ----------
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object";
