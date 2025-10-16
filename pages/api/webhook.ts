@@ -2,7 +2,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import crypto from "crypto";
 import { Readable } from "stream";
 
-const BUILD_ID = "discOmi-omi-extractor-001";
+const BUILD_ID = "discOmi-omi-extractor-002";
 
 // ---------- ENV ----------
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL!;
@@ -169,11 +169,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       bodyUnknown = safeJsonParse(raw);
     }
 
-    // Log parsed keys for debugging
-    try {
-      const keys = typeof bodyUnknown === "object" && bodyUnknown ? Object.keys(bodyUnknown as any) : [];
-      console.log("[DiscOmi] keys:", keys);
-    } catch {}
+    // Log build and parsed keys for debugging
+    console.log("[DiscOmi] build", BUILD_ID, "keys:", typeof bodyUnknown === "object" && bodyUnknown ? Object.keys(bodyUnknown as any) : "(not object)");
 
     // Extract uid from query params if present (Omi appends ?uid=...)
     const uid = typeof req.query?.uid === "string" ? req.query.uid : undefined;
