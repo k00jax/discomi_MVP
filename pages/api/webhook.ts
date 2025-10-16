@@ -138,89 +138,30 @@ function extractFromOmiMemory(body: unknown) {
       .join(" ");
   }
 
-  const audio =
-    pick(
-      b["audio_url"],
-      asRec(b["media"])["audio_url"],
-      asRec(b["memory"])["audio_url"]
-    ) || undefined;
-
-  const link =
-    pick(
-      b["url"],
-      b["deep_link"],
-      asRec(b["links"])["web"],
-      asRec(b["conversation"])["url"]
-    ) || undefined;
-
-  // Extract category, language, status, source
+  // Extract category
   const category =
     str(asRec(structured)["category"]) ||
     str(asRec(b["conversation"])["category"]) || "default";
-
-  const language = str(b["language"]) || str(asRec(structured)["language"]);
-  const status = str(b["status"]);
-  const source = str(b["source"]); // e.g., "omi_necklace"
-
-  // Geolocation → friendly string if available
-  const geo = asRec(b["geolocation"]);
-  const city = str(geo["city"]);
-  const country = str(geo["country"]);
-  const locationLabel = [city, country].filter(Boolean).join(", ") || undefined;
-
-  // Photos → use first photo URL if present
-  let thumb: string | undefined = undefined;
-  if (Array.isArray(b["photos"]) && b["photos"].length > 0) {
-    const first = asRec(b["photos"][0]);
-    thumb = str(first["url"]) || str(first["image_url"]) || undefined;
-  }
 
   return {
     id,
     title,
     body: bodyText || "(no text)",
     created_at,
-    audio,
-    link,
     category,
-    language,
-    status,
-    source,
-    locationLabel,
-    thumb,
   };
 }
 
-function toDiscordPayloadOmi(rawBody: unknown, uid?: string, options?: UserConfig["options"]) {
-  const data = extractFromOmiMemory(rawBody);
-  const { id, title, body, created_at, link, category, language, status, source, locationLabel, thumb } = data;
+function toDiscordPayloadOmi(rawBody: unknown, uid?: string) {
+  const { id, title, body, created_at, category } = extractFromOmiMemory(rawBody);
 
   const cat = (category || "default").toLowerCase();
   const emoji = CAT_EMOJI[cat] || CAT_EMOJI.default;
   const color = CAT_COLOR[cat] || CAT_COLOR.default;
 
-  const limit = options?.maxChars ?? (process.env.POST_FULL_TEXT === "true" ? 1900 : 900);
+  const limit = process.env.POST_FULL_TEXT === "true" ? 1900 : 900;
   const desc = clamp(body, limit);
 
-  // Build fields with metadata
-  const fields: Array<{ name: string; value: string; inline?: boolean }> = [
-    { name: "When", value: whenBlock(created_at), inline: true },
-    { name: "Category", value: cat, inline: true },
-  ];
-  if (locationLabel) fields.push({ name: "Location", value: locationLabel, inline: true });
-  if (language) fields.push({ name: "Language", value: language, inline: true });
-  if (source) fields.push({ name: "Source", value: source, inline: true });
-  if (status) fields.push({ name: "Status", value: status, inline: true });
-
-  // Optional "Open in Omi" button if we have a link
-  const components = link ? [{
-    type: 1,
-    components: [
-      { type: 2, style: 5, label: "Open in Omi", url: link } // style 5 = link button
-    ]
-  }] : undefined;
-
-  // Show uid in footer only when DEBUG is enabled
   const DEBUG = String(process.env.DEBUG || "").toLowerCase() === "true";
   const footerText = `Conversation • ${id}${DEBUG && uid ? ` • uid:${uid}` : ""}`;
 
@@ -233,15 +174,13 @@ function toDiscordPayloadOmi(rawBody: unknown, uid?: string, options?: UserConfi
         title: `${emoji} ${title}`,
         description: desc,
         color,
-        url: link || undefined,
         timestamp: new Date().toISOString(),
-        author: { name: "Omi", icon_url: OMI_ICON },
         footer: { text: footerText, icon_url: OMI_ICON },
-        fields,
-        thumbnail: thumb ? { url: thumb } : undefined,
+        fields: [
+          { name: "When", value: whenBlock(created_at), inline: true },
+        ],
       },
     ],
-    components,
   };
 }
 
@@ -304,15 +243,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Log build and parsed keys for debugging
     console.log("[DiscOmi] build", BUILD_ID, "keys:", typeof bodyUnknown === "object" && bodyUnknown ? Object.keys(bodyUnknown as UnknownRec) : "(not object)");
 
-    // Build Discord payload with uid and user options
-    const discordPayload = toDiscordPayloadOmi(bodyUnknown, uid, cfg.options);
+    // Build Discord payload with uid
+    const discordPayload = toDiscordPayloadOmi(bodyUnknown, uid);
 
     // Debug flag: add extra fields only when DEBUG=true
     const DEBUG = String(process.env.DEBUG || "").toLowerCase() === "true";
     if (DEBUG) {
       (discordPayload.embeds[0].fields ||= []).push(
-        { name: "Debug-Build", value: BUILD_ID },
-        { name: "Debug-Extractor", value: "toDiscordPayloadOmi" }
+        { name: "Debug-Build", value: BUILD_ID, inline: true },
+        { name: "Debug-Extractor", value: "toDiscordPayloadOmi", inline: true }
       );
 
       // Additional debug for structured payload
@@ -321,8 +260,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const keys = Object.keys(b).slice(0, 20).join(", ");
 
       (discordPayload.embeds[0].fields ||= []).push(
-        { name: "Debug-Keys", value: keys || "(no keys)" },
-        { name: "Debug-structured?", value: String(hasStructured) }
+        { name: "Debug-Keys", value: keys || "(no keys)", inline: true },
+        { name: "Debug-structured?", value: String(hasStructured), inline: true }
       );
     }
 
