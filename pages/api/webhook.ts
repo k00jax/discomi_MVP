@@ -71,13 +71,26 @@ function toDiscordPayload(body: OmiPayload) {
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== "POST") return res.status(405).send("method_not_allowed");
+  // Allow health checks and preflight
+  if (req.method === "GET") return res.status(200).send("ok");
+  if (req.method === "HEAD") return res.status(200).end();
+  if (req.method === "OPTIONS") {
+    res.setHeader("Allow", "POST, GET, HEAD, OPTIONS");
+    res.setHeader("Access-Control-Allow-Methods", "POST, GET, HEAD, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    return res.status(204).end();
+  }
+  if (req.method !== "POST") {
+    res.setHeader("Allow", "POST, GET, HEAD, OPTIONS");
+    return res.status(405).send("method_not_allowed");
+  }
 
-  // Simple query-token auth (Step B)
+  // Simple query-token auth (POST only)
   const token = (req.query.token as string | undefined) ?? "";
-  if (!WEBHOOK_TOKEN || token !== WEBHOOK_TOKEN) {
+  if (!process.env.WEBHOOK_TOKEN || token !== process.env.WEBHOOK_TOKEN) {
     return res.status(401).send("unauthorized");
   }
+
 
   try {
     // Using parsed JSON; switch to raw bytes only if Omi requires exact-byte HMAC
