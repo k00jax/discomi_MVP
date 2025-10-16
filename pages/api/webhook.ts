@@ -11,13 +11,21 @@ const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL!;
 const OMI_SIGNING_SECRET = process.env.OMI_SIGNING_SECRET || "";
 const WEBHOOK_TOKEN = process.env.WEBHOOK_TOKEN || "";
 
-// ---------- Utils ----------
-const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object";
-const get = (o: unknown, k: string): unknown => (isObj(o) ? o[k] : undefined);
-const pickStr = (...vals: unknown[]) => {
-  for (const v of vals) if (typeof v === "string" && v.trim()) return v.trim();
+// ---------- Typed helpers ----------
+type UnknownRec = Record<string, unknown>;
+const asRec = (v: unknown): UnknownRec =>
+  v && typeof v === "object" ? (v as UnknownRec) : {};
+
+const str = (v: unknown | undefined): string | undefined =>
+  typeof v === "string" && v.trim() ? v.trim() : undefined;
+
+function pick(...vals: Array<unknown>): string | undefined {
+  for (const v of vals) {
+    const s = str(v);
+    if (s) return s;
+  }
   return undefined;
-};
+}
 
 async function readRawBody(req: NextApiRequest): Promise<string> {
   const chunks: Buffer[] = [];
@@ -42,57 +50,77 @@ function verifySignature(req: NextApiRequest, rawBody: string): boolean {
   }
 }
 
-// ---------- Extractors tuned for Omi memory JSON ----------
+// ---------- Omi shapes ----------
 type Seg = { text?: string };
-type Structured = {
-  title?: string;
-  overview?: string;
-  emoji?: string;
-  category?: string;
-  action_items?: unknown[];
-  events?: unknown[];
-};
+type Structured = { title?: string; overview?: string };
 
-function extractFromOmiMemory(b: Record<string, unknown>) {
-  const structured = (b["structured"] as Structured) || {};
-  const segments = (b["transcript_segments"] as Seg[]) || [];
+// ---------- Extractors tuned for Omi ----------
+function extractFromOmiMemory(body: unknown) {
+  const b = asRec(body);
+
+  const structured = asRec(b["structured"]) as Structured;
+  const segments = (Array.isArray(b["transcript_segments"])
+    ? (b["transcript_segments"] as unknown[])
+    : []
+  ).map((x) => asRec(x) as Seg);
 
   const id =
-    String(b["id"] ?? b["conversation_id"] ?? (b as any)?.conversation?.id ?? (b as any)?.memory?.id ?? "unknown");
+    pick(b["id"], b["conversation_id"], asRec(b["conversation"])["id"], asRec(b["memory"])["id"]) ??
+    "unknown";
 
   const created_at =
-    String(b["created_at"] ?? (b as any)?.memory?.created_at ?? (b as any)?.conversation?.created_at ?? new Date().toISOString());
+    pick(
+      b["created_at"],
+      asRec(b["memory"])["created_at"],
+      asRec(b["conversation"])["created_at"]
+    ) ?? new Date().toISOString();
 
-  // Prefer Omi's structured title/overview
   const title =
-    structured.title?.trim() ||
-    String(b["title"] ?? (b as any)?.conversation?.title ?? (b as any)?.memory?.title ?? "New Omi memory");
+    str((structured as Structured).title) ||
+    pick(b["title"], asRec(b["conversation"])["title"], asRec(b["memory"])["title"]) ||
+    "New Omi memory";
 
-  let body =
-    structured.overview?.trim() ||
-    String(b["summary"] ?? (b as any)?.conversation?.summary ?? "");
+  let bodyText =
+    str((structured as Structured).overview) ||
+    pick(b["summary"], asRec(b["conversation"])["summary"]) ||
+    "";
 
-  // If overview/summary is empty, fall back to concatenated transcript
-  if (!body) {
-    const joined = segments.map(s => (s.text || "").trim()).filter(Boolean).join(" ");
-    body = joined || "(no text)";
+  if (!bodyText && segments.length) {
+    bodyText = segments
+      .map((s) => str(s.text) || "")
+      .filter(Boolean)
+      .join(" ");
   }
 
-  // Optional link/audio if present
   const audio =
-    String((b as any)?.audio_url ?? (b as any)?.media?.audio_url ?? (b as any)?.memory?.audio_url ?? "") || undefined;
-  const link =
-    String((b as any)?.url ?? (b as any)?.deep_link ?? (b as any)?.links?.web ?? (b as any)?.conversation?.url ?? "") || undefined;
+    pick(
+      b["audio_url"],
+      asRec(b["media"])["audio_url"],
+      asRec(b["memory"])["audio_url"]
+    ) || undefined;
 
-  return { id, title, body, created_at, audio, link };
+  const link =
+    pick(
+      b["url"],
+      b["deep_link"],
+      asRec(b["links"])["web"],
+      asRec(b["conversation"])["url"]
+    ) || undefined;
+
+  return {
+    id,
+    title,
+    body: bodyText || "(no text)",
+    created_at,
+    audio,
+    link,
+  };
 }
 
 function toDiscordPayloadOmi(rawBody: unknown, uid?: string) {
-  const b = (rawBody && typeof rawBody === "object") ? (rawBody as Record<string, unknown>) : {};
-  const { id, title, body, created_at, audio, link } = extractFromOmiMemory(b);
+  const { id, title, body, created_at, audio, link } = extractFromOmiMemory(rawBody);
 
   const limit = process.env.POST_FULL_TEXT === "true" ? 1900 : 400;
-  const bodyText = body.slice(0, limit);
   const footerExtra = uid ? ` • uid: ${uid}` : "";
 
   return {
@@ -104,7 +132,7 @@ function toDiscordPayloadOmi(rawBody: unknown, uid?: string) {
           `**${title}**`,
           `at ${created_at}`,
           "",
-          bodyText + (body.length > limit ? "…" : "")
+          body.slice(0, limit) + (body.length > limit ? "…" : ""),
         ].join("\n"),
         url: link || undefined,
         timestamp: new Date().toISOString(),
@@ -165,11 +193,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     // Log build and parsed keys for debugging
-    console.log("[DiscOmi] build", BUILD_ID, "keys:", typeof bodyUnknown === "object" && bodyUnknown ? Object.keys(bodyUnknown as any) : "(not object)");
+    console.log("[DiscOmi] build", BUILD_ID, "keys:", typeof bodyUnknown === "object" && bodyUnknown ? Object.keys(bodyUnknown as UnknownRec) : "(not object)");
 
     // Extract uid from query params if present (Omi appends ?uid=...)
     const uid = typeof req.query?.uid === "string" ? req.query.uid : undefined;
-    const discordPayload = toDiscordPayloadOmi(bodyUnknown as unknown, uid);
+    const discordPayload = toDiscordPayloadOmi(bodyUnknown, uid);
 
     // Force visible debug stamps to verify correct build/extractor
     (discordPayload.embeds[0].fields ||= []).push(
@@ -178,7 +206,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     );
 
     // Additional debug for structured payload
-    const b = (typeof bodyUnknown === "object" && bodyUnknown) ? (bodyUnknown as Record<string, unknown>) : {};
+    const b = asRec(bodyUnknown);
     const hasStructured = Object.prototype.hasOwnProperty.call(b, "structured");
     const keys = Object.keys(b).slice(0, 20).join(", ");
 
