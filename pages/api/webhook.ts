@@ -42,18 +42,93 @@ export const config = {
   },
 };
 
-function toDiscordPayload(body: OmiPayload) {
-  const id = body.id || body.conversation_id || "unknown";
-  const title = body.title || body.summary || "New Omi memory";
-  const text = body.text || body.content || "(no text)";
-  const user = body.user?.name || body.author || "unknown";
-  const ts = body.created_at || new Date().toISOString();
-  const audio = body.audio_url || body.media?.audio_url;
-  const link = body.url || body.deep_link;
+// --- helpers to safely read unknown payloads ---
+function isObj(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === "object";
+}
+function pickStr(...vals: unknown[]): string | undefined {
+  for (const v of vals) if (typeof v === "string" && v.trim()) return v.trim();
+  return undefined;
+}
+function path(o: unknown, keys: string[]): unknown {
+  let cur: unknown = o;
+  for (const k of keys) {
+    if (!isObj(cur)) return undefined;
+    cur = cur[k];
+  }
+  return cur;
+}
 
-  const desc =
-    [`**${title}**`, `by **${user}** at ${ts}`, "", (text || "").slice(0, 1200) + ((text?.length || 0) > 1200 ? "…" : "")]
-      .join("\n");
+// Extract the most likely fields from various Omi shapes
+function extractFields(body: unknown) {
+  const b = isObj(body) ? body : {};
+
+  const id = pickStr(
+    (b.id as string),
+    (b["conversation_id"] as string),
+    path(b, ["conversation", "id"]) as string,
+    path(b, ["memory", "id"]) as string,
+  ) || "unknown";
+
+  const title = pickStr(
+    (b["title"] as string),
+    (b["summary"] as string),
+    path(b, ["conversation", "title"]) as string,
+    path(b, ["memory", "title"]) as string,
+  ) || "New Omi memory";
+
+  const text = pickStr(
+    (b["text"] as string),
+    (b["content"] as string),
+    (b["transcript"] as string),
+    path(b, ["memory", "text"]) as string,
+    path(b, ["memory", "content"]) as string,
+    path(b, ["message"]) as string,
+  ) || "(no text)";
+
+  const user = pickStr(
+    path(b, ["user", "name"]) as string,
+    (b["author"] as string),
+    path(b, ["account", "name"]) as string,
+    path(b, ["creator", "name"]) as string,
+    path(b, ["owner", "name"]) as string,
+  ) || "unknown";
+
+  const ts = pickStr(
+    (b["created_at"] as string),
+    (b["createdAt"] as string),
+    path(b, ["memory", "created_at"]) as string,
+    path(b, ["conversation", "created_at"]) as string,
+  ) || new Date().toISOString();
+
+  const audio = pickStr(
+    (b["audio_url"] as string),
+    path(b, ["media", "audio_url"]) as string,
+    path(b, ["memory", "audio_url"]) as string,
+  );
+
+  const link = pickStr(
+    (b["url"] as string),
+    (b["deep_link"] as string),
+    path(b, ["links", "web"]) as string,
+    path(b, ["memory", "url"]) as string,
+  );
+
+  return { id, title, text, user, ts, audio, link };
+}
+
+function toDiscordPayload(rawBody: OmiPayload | unknown) {
+  const { id, title, text, user, ts, audio, link } = extractFields(rawBody);
+
+  const raw = String(text || "");
+  const limit = process.env.POST_FULL_TEXT === "true" ? 1900 : 400;
+  const bodyText = raw.slice(0, limit);
+  const desc = [
+    `**${title}**`,
+    `by **${user}** at ${ts}`,
+    "",
+    bodyText + (raw.length > limit ? "…" : "")
+  ].join("\n");
 
   return {
     content: null,
@@ -102,6 +177,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
 
   try {
+    console.log("[DiscOmi] inbound keys:", Object.keys(req.body || {}));
     // Using parsed JSON; switch to raw bytes only if Omi requires exact-byte HMAC
     const raw = JSON.stringify(req.body ?? {});
     if (!verifySignature(req, raw)) return res.status(401).send("invalid_signature");
