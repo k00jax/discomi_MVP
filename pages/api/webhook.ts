@@ -1,9 +1,22 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import crypto from "crypto";
+import { Readable } from "stream";
 
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL!;
 const OMI_SIGNING_SECRET = process.env.OMI_SIGNING_SECRET || "";
 const WEBHOOK_TOKEN = process.env.WEBHOOK_TOKEN || "";
+
+async function readRawBody(req: NextApiRequest): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req as unknown as Readable) {
+    chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+function safeJsonParse(s: string): unknown {
+  try { return JSON.parse(s); } catch { return s; }
+}
 
 // ---- Types for the Omi webhook body ----
 type OmiUser = { name?: string };
@@ -38,9 +51,98 @@ function verifySignature(req: NextApiRequest, rawBody: string): boolean {
 
 export const config = {
   api: {
-    bodyParser: { sizeLimit: "2mb" },
+    bodyParser: false, // we'll read the raw stream ourselves
   },
 };
+
+// Helper utils
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object";
+const pickStr = (...vals: unknown[]) => {
+  for (const v of vals) if (typeof v === "string" && v.trim()) return v.trim();
+  return undefined;
+};
+const path = (o: unknown, keys: string[]): unknown => {
+  let cur: unknown = o;
+  for (const k of keys) { if (!isObj(cur)) return undefined; cur = cur[k]; }
+  return cur;
+};
+
+function toDiscordPayload(bodyUnknown: unknown) {
+  // Try common Omi shapes and generic "data" envelopes
+  const b = isObj(bodyUnknown) ? bodyUnknown : {};
+  const envelope = (isObj(b.data) ? b.data : b) as Record<string, unknown>;
+
+  const id = pickStr(
+    envelope.id, envelope.conversation_id,
+    path(envelope, ["conversation","id"]), path(envelope, ["memory","id"])
+  ) || "unknown";
+
+  const title = pickStr(
+    envelope.title, envelope.summary,
+    path(envelope, ["conversation","title"]), path(envelope, ["memory","title"])
+  ) || "New Omi memory";
+
+  let text = pickStr(
+    envelope.text, envelope.content, envelope.transcript,
+    path(envelope, ["memory","text"]), path(envelope, ["memory","content"]),
+    path(envelope, ["conversation","summary"]), path(envelope, ["message"])
+  );
+
+  const user = pickStr(
+    path(envelope, ["user","name"]), path(envelope, ["user","display_name"]),
+    envelope.author, path(envelope, ["account","name"]),
+    path(envelope, ["creator","name"]), path(envelope, ["owner","name"])
+  ) || "unknown";
+
+  const ts = pickStr(
+    envelope.created_at, envelope.createdAt,
+    path(envelope, ["memory","created_at"]), path(envelope, ["conversation","created_at"]),
+    envelope.timestamp
+  ) || new Date().toISOString();
+
+  const audio = pickStr(
+    envelope.audio_url, path(envelope, ["media","audio_url"]),
+    path(envelope, ["memory","audio_url"])
+  );
+  const link = pickStr(
+    envelope.url, envelope.deep_link,
+    path(envelope, ["links","web"]), path(envelope, ["memory","url"]),
+    path(envelope, ["conversation","url"])
+  );
+
+  // Fail-soft: if no text, show first 400 chars of raw JSON
+  let debugField: { name: string; value: string } | undefined;
+  if (!text) {
+    const dbg = (() => { try { return JSON.stringify(bodyUnknown); } catch { return String(bodyUnknown); } })() || "";
+    text = dbg ? dbg.slice(0, 400) + (dbg.length > 400 ? "…" : "") : "(no text)";
+    debugField = { name: "Debug", value: "Payload keys: " + Object.keys(b).join(", ") };
+  }
+
+  // Description with length control
+  const raw = String(text || "");
+  const limit = process.env.POST_FULL_TEXT === "true" ? 1900 : 400;
+  const bodyText = raw.slice(0, limit);
+
+  return {
+    content: null,
+    embeds: [{
+      title: "New Omi Conversation",
+      description: [
+        `**${title}**`,
+        `by **${user}** at ${ts}`,
+        "",
+        bodyText + (raw.length > limit ? "…" : "")
+      ].join("\n"),
+      url: link || undefined,
+      timestamp: new Date().toISOString(),
+      footer: { text: `Conversation ID: ${id}` },
+      fields: [
+        ...(audio ? [{ name: "Audio", value: String(audio) }] : []),
+        ...(debugField ? [debugField] : []),
+      ]
+    }],
+  };
+}
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   // Always advertise what we accept
@@ -74,102 +176,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
 
   try {
-    // Visibility
+    const raw = await readRawBody(req);
     const ct = String(req.headers["content-type"] || "");
-    console.log("[DiscOmi] inbound", { method: req.method, ct, hasBody: !!req.body });
+    console.log("[DiscOmi] inbound", { method: req.method, ct, rawLen: raw.length });
 
-    // Parse body across content types
-    let bodyUnknown: unknown = req.body;
-    if (typeof req.body === "string") {
-      try { bodyUnknown = JSON.parse(req.body); } catch { bodyUnknown = req.body; }
-    }
+    // If you enable signature later, compute HMAC on `raw` bytes here
+    if (!verifySignature(req, raw)) return res.status(401).send("invalid_signature");
+    if (!DISCORD_WEBHOOK_URL) return res.status(500).send("missing_webhook");
 
-    // Helper utils
-    const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object";
-    const pickStr = (...vals: unknown[]) => {
-      for (const v of vals) if (typeof v === "string" && v.trim()) return v.trim();
-      return undefined;
-    };
-    const path = (o: unknown, keys: string[]): unknown => {
-      let cur: unknown = o;
-      for (const k of keys) { if (!isObj(cur)) return undefined; cur = cur[k]; }
-      return cur;
-    };
+    const bodyUnknown = safeJsonParse(raw);
 
-    // Try common Omi shapes and generic "data" envelopes
-    const b = isObj(bodyUnknown) ? bodyUnknown : {};
-    const envelope = (isObj(b.data) ? b.data : b) as Record<string, unknown>;
+    // ========== extraction (your existing helpers are fine) ==========
+    // Keep your extractFields/toDiscordPayload helpers, but call them with `bodyUnknown`
+    const discordPayload = toDiscordPayload(bodyUnknown as unknown);
 
-    const id = pickStr(
-      envelope.id, envelope.conversation_id,
-      path(envelope, ["conversation","id"]), path(envelope, ["memory","id"])
-    ) || "unknown";
-
-    const title = pickStr(
-      envelope.title, envelope.summary,
-      path(envelope, ["conversation","title"]), path(envelope, ["memory","title"])
-    ) || "New Omi memory";
-
-    let text = pickStr(
-      envelope.text, envelope.content, envelope.transcript,
-      path(envelope, ["memory","text"]), path(envelope, ["memory","content"]),
-      path(envelope, ["conversation","summary"]), path(envelope, ["message"])
-    );
-
-    const user = pickStr(
-      path(envelope, ["user","name"]), path(envelope, ["user","display_name"]),
-      envelope.author, path(envelope, ["account","name"]),
-      path(envelope, ["creator","name"]), path(envelope, ["owner","name"])
-    ) || "unknown";
-
-    const ts = pickStr(
-      envelope.created_at, envelope.createdAt,
-      path(envelope, ["memory","created_at"]), path(envelope, ["conversation","created_at"]),
-      envelope.timestamp
-    ) || new Date().toISOString();
-
-    const audio = pickStr(
-      envelope.audio_url, path(envelope, ["media","audio_url"]),
-      path(envelope, ["memory","audio_url"])
-    );
-    const link = pickStr(
-      envelope.url, envelope.deep_link,
-      path(envelope, ["links","web"]), path(envelope, ["memory","url"]),
-      path(envelope, ["conversation","url"])
-    );
-
-    // Fail-soft: if no text, show first 400 chars of raw JSON
-    let debugField: { name: string; value: string } | undefined;
-    if (!text) {
-      const dbg = (() => { try { return JSON.stringify(bodyUnknown); } catch { return String(bodyUnknown); } })() || "";
-      text = dbg ? dbg.slice(0, 400) + (dbg.length > 400 ? "…" : "") : "(no text)";
-      debugField = { name: "Debug", value: "Payload keys: " + Object.keys(b).join(", ") };
-    }
-
-    // Description with length control
-    const raw = String(text || "");
-    const limit = process.env.POST_FULL_TEXT === "true" ? 1900 : 400;
-    const bodyText = raw.slice(0, limit);
-
-    const discordPayload = {
-      content: null,
-      embeds: [{
-        title: "New Omi Conversation",
-        description: [
-          `**${title}**`,
-          `by **${user}** at ${ts}`,
-          "",
-          bodyText + (raw.length > limit ? "…" : "")
-        ].join("\n"),
-        url: link || undefined,
-        timestamp: new Date().toISOString(),
-        footer: { text: `Conversation ID: ${id}` },
-        fields: [
-          ...(audio ? [{ name: "Audio", value: String(audio) }] : []),
-          ...(debugField ? [debugField] : []),
-        ]
-      }],
-    };
+    // FORCE a debug field for now so we can see the shape in Discord
+    try {
+      const dbg = typeof bodyUnknown === "string" ? bodyUnknown : JSON.stringify(bodyUnknown);
+      const clipped = dbg.slice(0, 900) + (dbg.length > 900 ? "…" : "");
+      (discordPayload.embeds[0].fields ||= []).push({ name: "Debug", value: "```json\n" + clipped + "\n```" });
+    } catch {}
 
     const r = await fetch(DISCORD_WEBHOOK_URL, {
       method: "POST",
