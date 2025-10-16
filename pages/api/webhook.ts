@@ -1,7 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import crypto from "crypto";
 import { Readable } from "stream";
-import { kv } from "@vercel/kv";
+import { supabaseAdmin } from "../../lib/supabase";
 import type { UserConfig } from "../../types";
 
 // ---------- Next config: read raw bytes ourselves ----------
@@ -202,8 +202,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const uid = typeof req.query.uid === "string" ? req.query.uid : "";
     if (!uid) return res.status(400).send("missing_uid");
 
-    // Look up per-user config from KV
-    const cfg = await kv.get<UserConfig>(`user:${uid}`);
+    // Look up per-user config from Supabase
+    const { data: cfg, error } = await supabaseAdmin
+      .from("user_configs")
+      .select("webhook_url, token, options")
+      .eq("uid", uid)
+      .single();
+
+    if (error) return res.status(500).send("db_error");
     if (!cfg) return res.status(403).send("setup_required");
 
     // Check per-user token
@@ -211,7 +217,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // Optional: verify signature over raw if you set OMI_SIGNING_SECRET
     if (!verifySignature(req, raw)) return res.status(401).send("invalid_signature");
-    if (!cfg.webhookUrl) return res.status(500).send("missing_webhook");
+    if (!cfg.webhook_url) return res.status(500).send("missing_webhook");
 
     // Parse flexibly:
     let bodyUnknown: unknown = raw;
@@ -266,7 +272,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     // Post to user's Discord webhook
-    const r = await fetch(cfg.webhookUrl, {
+    const r = await fetch(cfg.webhook_url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(discordPayload),

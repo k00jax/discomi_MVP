@@ -1,9 +1,9 @@
 export type UserConfig = {
-  webhookUrl: string;
+  uid: string;
+  webhook_url: string;
   token: string;
   options?: {
     includeTranscript?: boolean;
-    includeAudio?: boolean;
     maxChars?: number;
   };
 };
