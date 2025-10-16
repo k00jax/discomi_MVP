@@ -1,15 +1,15 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import crypto from "crypto";
 import { Readable } from "stream";
+import { kv } from "@vercel/kv";
+import type { UserConfig } from "../../types";
 
 // ---------- Next config: read raw bytes ourselves ----------
 export const config = { api: { bodyParser: false } };
 const BUILD_ID = process.env.BUILD_ID || "unknown";
 
 // ---------- ENV ----------
-const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL!;
 const OMI_SIGNING_SECRET = process.env.OMI_SIGNING_SECRET || "";
-const WEBHOOK_TOKEN = process.env.WEBHOOK_TOKEN || "";
 
 // ---------- Typed helpers ----------
 type UnknownRec = Record<string, unknown>;
@@ -132,11 +132,17 @@ function extractFromOmiMemory(body: unknown) {
   };
 }
 
-function toDiscordPayloadOmi(rawBody: unknown, uid?: string) {
+function toDiscordPayloadOmi(rawBody: unknown, uid?: string, options?: UserConfig["options"]) {
   const { id, title, body, created_at, audio, link } = extractFromOmiMemory(rawBody);
 
-  const limit = process.env.POST_FULL_TEXT === "true" ? 1900 : 400;
+  const limit = options?.maxChars ?? (process.env.POST_FULL_TEXT === "true" ? 1900 : 400);
   const footerExtra = uid ? ` • uid: ${uid}` : "";
+
+  // Build fields array conditionally
+  const fields: Array<{ name: string; value: string }> = [];
+  if (options?.includeAudio !== false && audio) {
+    fields.push({ name: "Audio", value: audio });
+  }
 
   return {
     content: null,
@@ -152,7 +158,7 @@ function toDiscordPayloadOmi(rawBody: unknown, uid?: string) {
         url: link || undefined,
         timestamp: new Date().toISOString(),
         footer: { text: `Conversation ID: ${id}${footerExtra}` },
-        fields: audio ? [{ name: "Audio", value: audio }] : [],
+        fields,
       },
     ],
   };
@@ -176,14 +182,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const uid = typeof req.query.uid === "string" ? req.query.uid : "";
     if (!uid) return res.status(400).send("missing_uid");
 
-    // Single-tenant guard: verify token matches environment
-    // TODO: Replace with Vercel KV or store for multi-user support
-    const TOKEN = process.env.WEBHOOK_TOKEN || "";
-    if (!TOKEN || String(req.query.token) !== TOKEN) return res.status(401).send("unauthorized");
+    // Look up per-user config from KV
+    const cfg = await kv.get<UserConfig>(`user:${uid}`);
+    if (!cfg) return res.status(403).send("setup_required");
+
+    // Check per-user token
+    if (String(req.query.token || "") !== cfg.token) return res.status(401).send("unauthorized");
 
     // Optional: verify signature over raw if you set OMI_SIGNING_SECRET
     if (!verifySignature(req, raw)) return res.status(401).send("invalid_signature");
-    if (!DISCORD_WEBHOOK_URL) return res.status(500).send("missing_webhook");
+    if (!cfg.webhookUrl) return res.status(500).send("missing_webhook");
 
     // Parse flexibly:
     let bodyUnknown: unknown = raw;
@@ -215,8 +223,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Log build and parsed keys for debugging
     console.log("[DiscOmi] build", BUILD_ID, "keys:", typeof bodyUnknown === "object" && bodyUnknown ? Object.keys(bodyUnknown as UnknownRec) : "(not object)");
 
-    // Build Discord payload with uid (already extracted above)
-    const discordPayload = toDiscordPayloadOmi(bodyUnknown, uid);
+    // Build Discord payload with uid and user options
+    const discordPayload = toDiscordPayloadOmi(bodyUnknown, uid, cfg.options);
 
     // Debug flag: add extra fields only when DEBUG=true
     const DEBUG = String(process.env.DEBUG || "").toLowerCase() === "true";
@@ -237,7 +245,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       );
     }
 
-    const r = await fetch(DISCORD_WEBHOOK_URL, {
+    // Post to user's Discord webhook
+    const r = await fetch(cfg.webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(discordPayload),
