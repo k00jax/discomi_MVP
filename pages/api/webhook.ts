@@ -71,25 +71,34 @@ function toDiscordPayload(body: OmiPayload) {
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  // Allow health checks and preflight
-  if (req.method === "GET") return res.status(200).send("ok");
-  if (req.method === "HEAD") return res.status(200).end();
-  if (req.method === "OPTIONS") {
-    res.setHeader("Allow", "POST, GET, HEAD, OPTIONS");
-    res.setHeader("Access-Control-Allow-Methods", "POST, GET, HEAD, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-    return res.status(204).end();
-  }
-  if (req.method !== "POST") {
-    res.setHeader("Allow", "POST, GET, HEAD, OPTIONS");
-    return res.status(405).send("method_not_allowed");
+  // Always advertise what we accept
+  res.setHeader("Allow", "POST, GET, HEAD, OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "POST, GET, HEAD, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  // Temporary visibility (remove after debugging)
+  console.log("[DiscOmi] method:", req.method, "path:", req.url, "qs:", req.query);
+
+  switch (req.method) {
+    case "GET":
+      return res.status(200).send("ok");
+    case "HEAD":
+      return res.status(200).end();
+    case "OPTIONS":
+      return res.status(204).end();
+    case "POST":
+      break; // continue into POST logic below
+    default:
+      return res.status(405).send("method_not_allowed");
   }
 
-  // Simple query-token auth (POST only)
+  // ----- POST ONLY BELOW -----
+  // Simple query-token auth
   const token = (req.query.token as string | undefined) ?? "";
   if (!process.env.WEBHOOK_TOKEN || token !== process.env.WEBHOOK_TOKEN) {
     return res.status(401).send("unauthorized");
   }
+
 
 
   try {
