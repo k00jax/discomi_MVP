@@ -19,9 +19,24 @@ const asRec = (v: unknown): UnknownRec =>
 const str = (v: unknown | undefined): string | undefined =>
   typeof v === "string" && v.trim() ? v.trim() : undefined;
 
+// Accept string or number and return string
+const strOrNum = (v: unknown): string | undefined => {
+  if (typeof v === "string" && v.trim()) return v.trim();
+  if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  return undefined;
+};
+
 function pick(...vals: Array<unknown>): string | undefined {
   for (const v of vals) {
     const s = str(v);
+    if (s) return s;
+  }
+  return undefined;
+}
+
+function pickSN(...vals: unknown[]): string | undefined {
+  for (const v of vals) {
+    const s = strOrNum(v);
     if (s) return s;
   }
   return undefined;
@@ -65,11 +80,11 @@ function extractFromOmiMemory(body: unknown) {
   ).map((x) => asRec(x) as Seg);
 
   const id =
-    pick(b["id"], b["conversation_id"], asRec(b["conversation"])["id"], asRec(b["memory"])["id"]) ??
+    pickSN(b["id"], b["conversation_id"], asRec(b["conversation"])["id"], asRec(b["memory"])["id"]) ??
     "unknown";
 
   const created_at =
-    pick(
+    pickSN(
       b["created_at"],
       asRec(b["memory"])["created_at"],
       asRec(b["conversation"])["created_at"]
