@@ -5,9 +5,19 @@ import type { UserConfig } from "../../types";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") return res.status(405).send("method_not_allowed");
-  const { uid, webhookUrl, options } = req.body || {};
-  if (!uid || !webhookUrl) return res.status(400).send("missing_uid_or_webhook");
 
+  // uid priority: query, body
+  const uidQ = typeof req.query.uid === "string" ? req.query.uid : "";
+  const uidB = typeof req.body?.uid === "string" ? req.body.uid : "";
+  const uid = uidQ || uidB || "";
+  const webhookUrl = String(req.body?.webhookUrl || "");
+
+  if (!uid) return res.status(400).send("missing_uid");
+  if (!/^https:\/\/discord\.com\/api\/webhooks\//.test(webhookUrl)) {
+    return res.status(400).send("invalid_webhook_url");
+  }
+
+  // Generate per-user token for fallback/manual tests
   const token = "u_" + crypto.randomBytes(24).toString("hex");
 
   const upsert: UserConfig = {
@@ -15,19 +25,31 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     webhook_url: String(webhookUrl),
     token,
     options: {
-      includeTranscript: Boolean(options?.includeTranscript ?? true),
-      maxChars: Math.min(Number(options?.maxChars ?? 900), 1900),
+      includeTranscript: Boolean(req.body?.options?.includeTranscript ?? true),
+      maxChars: Math.min(Number(req.body?.options?.maxChars ?? 900), 1900),
     },
   };
 
-  const { error } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from("user_configs")
-    .upsert<UserConfig>(upsert, { onConflict: "uid" });
+    .upsert<UserConfig>(upsert, { onConflict: "uid" })
+    .select("webhook_url, token")
+    .single();
+
   if (error) return res.status(500).send("db_error");
 
-  const base = process.env.NEXT_PUBLIC_BASE_URL || `https://${req.headers.host}`;
-  // Paste this into Omi. Omi will append &uid=<uid>.
-  const omiWebhook = `${base}/api/webhook?token=${encodeURIComponent(token)}`;
+  // Return the ready-to-use webhook URL with app token
+  const appToken = process.env.APP_WEBHOOK_TOKEN || "";
+  const protocol = req.headers["x-forwarded-proto"] ?? "https";
+  const host = req.headers.host;
+  const base = new URL(`${protocol}://${host}/api/webhook`);
+  
+  if (appToken) base.searchParams.set("app", appToken);
+  base.searchParams.set("uid", uid);
 
-  res.status(200).json({ ok: true, omiWebhook });
+  res.status(200).json({ 
+    ok: true, 
+    omiWebhook: base.toString(), 
+    token: data?.token 
+  });
 }
