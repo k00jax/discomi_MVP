@@ -167,14 +167,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method === "OPTIONS") return res.status(204).end();
   if (req.method !== "POST")  return res.status(405).send("method_not_allowed");
 
-  // Token-gate POSTs
-  const token = (req.query.token as string | undefined) ?? "";
-  if (!WEBHOOK_TOKEN || token !== WEBHOOK_TOKEN) return res.status(401).send("unauthorized");
-
   try {
     // Read raw bytes no matter the content-type
     const raw = await readRawBody(req);
     const ct  = String(req.headers["content-type"] || "");
+
+    // Multi-tenant safeguards: require uid and token
+    const uid = typeof req.query.uid === "string" ? req.query.uid : "";
+    if (!uid) return res.status(400).send("missing_uid");
+
+    // Single-tenant guard: verify token matches environment
+    // TODO: Replace with Vercel KV or store for multi-user support
+    const TOKEN = process.env.WEBHOOK_TOKEN || "";
+    if (!TOKEN || String(req.query.token) !== TOKEN) return res.status(401).send("unauthorized");
 
     // Optional: verify signature over raw if you set OMI_SIGNING_SECRET
     if (!verifySignature(req, raw)) return res.status(401).send("invalid_signature");
@@ -210,25 +215,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Log build and parsed keys for debugging
     console.log("[DiscOmi] build", BUILD_ID, "keys:", typeof bodyUnknown === "object" && bodyUnknown ? Object.keys(bodyUnknown as UnknownRec) : "(not object)");
 
-    // Extract uid from query params if present (Omi appends ?uid=...)
-    const uid = typeof req.query?.uid === "string" ? req.query.uid : undefined;
+    // Build Discord payload with uid (already extracted above)
     const discordPayload = toDiscordPayloadOmi(bodyUnknown, uid);
 
-    // Force visible debug stamps to verify correct build/extractor
-    (discordPayload.embeds[0].fields ||= []).push(
-      { name: "Debug-Build", value: BUILD_ID },
-      { name: "Debug-Extractor", value: "toDiscordPayloadOmi" }
-    );
+    // Debug flag: add extra fields only when DEBUG=true
+    const DEBUG = String(process.env.DEBUG || "").toLowerCase() === "true";
+    if (DEBUG) {
+      (discordPayload.embeds[0].fields ||= []).push(
+        { name: "Debug-Build", value: BUILD_ID },
+        { name: "Debug-Extractor", value: "toDiscordPayloadOmi" }
+      );
 
-    // Additional debug for structured payload
-    const b = asRec(bodyUnknown);
-    const hasStructured = Object.prototype.hasOwnProperty.call(b, "structured");
-    const keys = Object.keys(b).slice(0, 20).join(", ");
+      // Additional debug for structured payload
+      const b = asRec(bodyUnknown);
+      const hasStructured = Object.prototype.hasOwnProperty.call(b, "structured");
+      const keys = Object.keys(b).slice(0, 20).join(", ");
 
-    (discordPayload.embeds[0].fields ||= []).push(
-      { name: "Debug-Keys", value: keys || "(no keys)" },
-      { name: "Debug-structured?", value: String(hasStructured) }
-    );
+      (discordPayload.embeds[0].fields ||= []).push(
+        { name: "Debug-Keys", value: keys || "(no keys)" },
+        { name: "Debug-structured?", value: String(hasStructured) }
+      );
+    }
 
     const r = await fetch(DISCORD_WEBHOOK_URL, {
       method: "POST",
@@ -241,7 +248,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       console.error("Discord error:", r.status, err);
       return res.status(502).send("discord_error");
     }
-    return res.status(200).send(`ok:${BUILD_ID}`);
+    
+    // Return build stamp only when debugging
+    return res.status(200).send(DEBUG ? `ok:${BUILD_ID}` : "ok");
   } catch (e) {
     console.error(e);
     return res.status(500).send("server_error");
