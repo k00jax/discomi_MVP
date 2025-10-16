@@ -8,15 +8,15 @@ const WEBHOOK_TOKEN = process.env.WEBHOOK_TOKEN || "";
 
 async function readRawBody(req: NextApiRequest): Promise<string> {
   const chunks: Buffer[] = [];
-  for await (const chunk of req as unknown as Readable) {
+  for await (const chunk of (req as unknown as Readable)) {
     chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
   }
   return Buffer.concat(chunks).toString("utf8");
 }
-
-function safeJsonParse(s: string): unknown {
-  try { return JSON.parse(s); } catch { return s; }
-}
+function safeJsonParse(s: string): unknown { try { return JSON.parse(s); } catch { return s; } }
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object";
+const get = (o: unknown, k: string): unknown => (isObj(o) ? o[k] : undefined);
+const pickStr = (...vals: unknown[]) => { for (const v of vals) if (typeof v === "string" && v.trim()) return v.trim(); return undefined; };
 
 // ---- Types for the Omi webhook body ----
 type OmiUser = { name?: string };
@@ -55,95 +55,6 @@ export const config = {
   },
 };
 
-// --- tiny utils ---
-const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object";
-const get = (o: unknown, k: string): unknown => (isObj(o) ? o[k] : undefined);
-const pickStr = (...vals: unknown[]) => {
-  for (const v of vals) if (typeof v === "string" && v.trim()) return v.trim();
-  return undefined;
-};
-
-function toDiscordPayload(rawBody: unknown) {
-  const b = isObj(rawBody) ? rawBody : {};
-
-  // Prefer the shape you used before (title, text, timestamp, conversation_id)
-  const id = pickStr(
-    get(b,"conversation_id"),
-    get(b,"id"),
-    get(get(b,"conversation"),"id"),
-    get(get(b,"memory"),"id")
-  ) || "unknown";
-
-  const title = pickStr(
-    get(b,"title"),
-    get(b,"summary"),
-    get(get(b,"conversation"),"title"),
-    get(get(b,"memory"),"title")
-  ) || "New Omi memory";
-
-  const text = pickStr(
-    get(b,"text"),
-    get(b,"content"),
-    get(b,"transcript"),
-    get(get(b,"memory"),"text"),
-    get(get(b,"memory"),"content"),
-    get(get(b,"conversation"),"summary")
-  ) || "(no text)";
-
-  // Omi has used "timestamp" in your previous flow; keep other fallbacks
-  const ts = pickStr(
-    get(b,"timestamp"),
-    get(b,"created_at"),
-    get(b,"createdAt"),
-    get(get(b,"memory"),"created_at"),
-    get(get(b,"conversation"),"created_at")
-  ) || new Date().toISOString();
-
-  // Optional fields
-  const user = pickStr(
-    get(get(b,"user"),"name"),
-    get(b,"author"),
-    get(get(b,"account"),"name")
-  ) || "unknown";
-
-  const audio = pickStr(
-    get(b,"audio_url"),
-    get(get(b,"media"),"audio_url"),
-    get(get(b,"memory"),"audio_url")
-  );
-
-  const link = pickStr(
-    get(b,"url"),
-    get(b,"deep_link"),
-    get(get(b,"links"),"web"),
-    get(get(b,"conversation"),"url")
-  );
-
-  // Length control
-  const raw = String(text || "");
-  const limit = process.env.POST_FULL_TEXT === "true" ? 1900 : 400;
-  const bodyText = raw.slice(0, limit);
-
-  return {
-    content: null,
-    embeds: [
-      {
-        title: "New Omi Conversation",
-        description: [
-          `**${title}**`,
-          `by **${user}** at ${ts}`,
-          "",
-          bodyText + (raw.length > limit ? "…" : "")
-        ].join("\n"),
-        url: link || undefined,
-        timestamp: new Date().toISOString(),
-        footer: { text: `Conversation ID: ${id}` },
-        fields: audio ? [{ name: "Audio", value: String(audio) }] : [],
-      },
-    ],
-  };
-}
-
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   // Always advertise what we accept
   res.setHeader("Allow", "POST, GET, HEAD, OPTIONS");
@@ -180,34 +91,76 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const ct = String(req.headers["content-type"] || "");
     console.log("[DiscOmi] inbound", { method: req.method, ct, rawLen: raw.length });
 
-    // If you enable signature later, compute HMAC on `raw` bytes here
     if (!verifySignature(req, raw)) return res.status(401).send("invalid_signature");
     if (!DISCORD_WEBHOOK_URL) return res.status(500).send("missing_webhook");
 
-    const bodyUnknown = safeJsonParse(raw);
+    // Parse across types:
+    let bodyUnknown: unknown = raw;
 
-    // ========== extraction (your existing helpers are fine) ==========
-    // Keep your extractFields/toDiscordPayload helpers, but call them with `bodyUnknown`
-    const discordPayload = toDiscordPayload(bodyUnknown as unknown);
-
-    // FORCE a debug field for now so we can see the shape in Discord
-    try {
-      const dbg = typeof bodyUnknown === "string" ? bodyUnknown : JSON.stringify(bodyUnknown);
-      const clipped = dbg.slice(0, 900) + (dbg.length > 900 ? "…" : "");
-      (discordPayload.embeds[0].fields ||= []).push({ name: "Debug", value: "```json\n" + clipped + "\n```" });
-    } catch {}
-
-    const r = await fetch(DISCORD_WEBHOOK_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(discordPayload),
-    });
-
-    if (!r.ok) {
-      const err = await r.text();
-      console.error("Discord error:", r.status, err);
-      return res.status(502).send("discord_error");
+    if (ct.includes("application/json")) {
+      bodyUnknown = safeJsonParse(raw);
+    } else if (ct.includes("application/x-www-form-urlencoded")) {
+      const params = new URLSearchParams(raw);
+      // Common patterns: payload=<json> OR single unnamed key containing JSON
+      const payload = params.get("payload") || params.get("data") || params.get("body");
+      if (payload) {
+        bodyUnknown = safeJsonParse(payload);
+      } else if ([...params.keys()].length === 1) {
+        const onlyKey = [...params.keys()][0];
+        bodyUnknown = safeJsonParse(params.get(onlyKey) || "");
+      } else {
+        // fallback to key/value echo
+        bodyUnknown = Object.fromEntries(params.entries());
+      }
+    } else if (ct.includes("text/plain")) {
+      bodyUnknown = safeJsonParse(raw);
+    } else {
+      // unknown type; try JSON, then leave as raw string
+      const tryJson = safeJsonParse(raw);
+      bodyUnknown = tryJson;
     }
+
+    // ---- Extract preferred fields (your FongerBot shape first) ----
+    const b = isObj(bodyUnknown) ? bodyUnknown : {};
+    const id = pickStr(get(b,"conversation_id"), get(b,"id"), get(get(b,"conversation"),"id"), get(get(b,"memory"),"id")) || "unknown";
+    const title = pickStr(get(b,"title"), get(b,"summary"), get(get(b,"conversation"),"title"), get(get(b,"memory"),"title")) || "New Omi memory";
+    const text = pickStr(
+      get(b,"text"), get(b,"content"), get(b,"transcript"),
+      get(get(b,"memory"),"text"), get(get(b,"memory"),"content"),
+      get(get(b,"conversation"),"summary")
+    );
+    const ts = pickStr(get(b,"timestamp"), get(b,"created_at"), get(b,"createdAt"), get(get(b,"memory"),"created_at"), get(get(b,"conversation"),"created_at")) || new Date().toISOString();
+    const user = pickStr(get(get(b,"user"),"name"), get(b,"author"), get(get(b,"account"),"name")) || "unknown";
+    const audio = pickStr(get(b,"audio_url"), get(get(b,"media"),"audio_url"), get(get(b,"memory"),"audio_url"));
+    const link  = pickStr(get(b,"url"), get(b,"deep_link"), get(get(b,"links"),"web"), get(get(b,"conversation"),"url"));
+
+    // Fail-soft: if no text found, show the first 400 chars of raw JSON so Discord isn't blank
+    const rawJson = ((): string => { try { return typeof bodyUnknown === "string" ? bodyUnknown : JSON.stringify(bodyUnknown); } catch { return String(bodyUnknown); } })();
+    const textFinal = text || (rawJson ? rawJson.slice(0, 400) + (rawJson.length > 400 ? "…" : "") : "(no text)");
+
+    const limit = process.env.POST_FULL_TEXT === "true" ? 1900 : 400;
+    const bodyText = String(textFinal).slice(0, limit);
+
+    const fields: Array<{name: string; value: string}> = [];
+    if (audio) fields.push({ name: "Audio", value: String(audio) });
+    // One-time debug to see what Omi sent (remove later if noisy)
+    fields.push({ name: "Debug-CT", value: ct });
+    fields.push({ name: "Debug-Keys", value: isObj(b) ? Object.keys(b).slice(0, 16).join(", ") : "(not an object)" });
+
+    const discordPayload = {
+      content: null,
+      embeds: [{
+        title: "New Omi Conversation",
+        description: [`**${title}**`, `by **${user}** at ${ts}`, "", bodyText + (String(textFinal).length > limit ? "…" : "")].join("\n"),
+        url: link || undefined,
+        timestamp: new Date().toISOString(),
+        footer: { text: `Conversation ID: ${id}` },
+        fields
+      }]
+    };
+
+    const r = await fetch(DISCORD_WEBHOOK_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(discordPayload) });
+    if (!r.ok) { const err = await r.text(); console.error("Discord error:", r.status, err); return res.status(502).send("discord_error"); }
     return res.status(200).send("ok");
   } catch (e) {
     console.error(e);
