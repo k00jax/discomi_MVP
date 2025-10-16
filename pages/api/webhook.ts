@@ -8,7 +8,7 @@ const OMI_SIGNING_SECRET = process.env.OMI_SIGNING_SECRET || "";
 type OmiUser = { name?: string };
 type OmiMedia = { audio_url?: string };
 
-export interface OmiPayload {
+interface OmiPayload {
   id?: string;
   conversation_id?: string;
   title?: string;
@@ -41,11 +41,6 @@ export const config = {
   },
 };
 
-// Narrow unknown to a safe object
-function asRecord(v: unknown): Record<string, unknown> {
-  return v && typeof v === "object" ? (v as Record<string, unknown>) : {};
-}
-
 function toDiscordPayload(body: OmiPayload) {
   const id = body.id || body.conversation_id || "unknown";
   const title = body.title || body.summary || "New Omi memory";
@@ -76,17 +71,15 @@ function toDiscordPayload(body: OmiPayload) {
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") return res.status(405).send("method_not_allowed");
-
   try {
-    // Use parsed JSON for now; switch to raw reader only if Omi requires exact-byte HMAC
+    // Using parsed JSON; switch to raw bytes only if Omi requires exact-byte HMAC
     const raw = JSON.stringify(req.body ?? {});
     if (!verifySignature(req, raw)) return res.status(401).send("invalid_signature");
     if (!DISCORD_WEBHOOK_URL) return res.status(500).send("missing_webhook");
 
-    // Cast safely to our interface
-    const body = asRecord(req.body) as OmiPayload;
+    // Narrow to our known shape
+    const payload = toDiscordPayload((req.body ?? {}) as OmiPayload);
 
-    const payload = toDiscordPayload(body);
     const r = await fetch(DISCORD_WEBHOOK_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -98,7 +91,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       console.error("Discord error:", err);
       return res.status(502).send("discord_error");
     }
-
     return res.status(200).send("ok");
   } catch (e) {
     console.error(e);
