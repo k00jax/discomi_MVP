@@ -2,7 +2,27 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import crypto from "crypto";
 
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL!;
-const OMI_SIGNING_SECRET = process.env.OMI_SIGNING_SECRET || ""; // optional
+const OMI_SIGNING_SECRET = process.env.OMI_SIGNING_SECRET || "";
+
+// ---- Types for the Omi webhook body ----
+type OmiUser = { name?: string };
+type OmiMedia = { audio_url?: string };
+
+export interface OmiPayload {
+  id?: string;
+  conversation_id?: string;
+  title?: string;
+  summary?: string;
+  text?: string;
+  content?: string;
+  user?: OmiUser;
+  author?: string;
+  created_at?: string;
+  audio_url?: string;
+  media?: OmiMedia;
+  url?: string;
+  deep_link?: string;
+}
 
 function verifySignature(req: NextApiRequest, rawBody: string): boolean {
   if (!OMI_SIGNING_SECRET) return true;
@@ -17,13 +37,16 @@ function verifySignature(req: NextApiRequest, rawBody: string): boolean {
 
 export const config = {
   api: {
-    bodyParser: {
-      sizeLimit: "2mb",
-    },
+    bodyParser: { sizeLimit: "2mb" },
   },
 };
 
-function toDiscordPayload(body: any) {
+// Narrow unknown to a safe object
+function asRecord(v: unknown): Record<string, unknown> {
+  return v && typeof v === "object" ? (v as Record<string, unknown>) : {};
+}
+
+function toDiscordPayload(body: OmiPayload) {
   const id = body.id || body.conversation_id || "unknown";
   const title = body.title || body.summary || "New Omi memory";
   const text = body.text || body.content || "(no text)";
@@ -32,12 +55,9 @@ function toDiscordPayload(body: any) {
   const audio = body.audio_url || body.media?.audio_url;
   const link = body.url || body.deep_link;
 
-  const desc = [
-    `**${title}**`,
-    `by **${user}** at ${ts}`,
-    "",
-    (text || "").slice(0, 1200) + (text && text.length > 1200 ? "…" : ""),
-  ].join("\n");
+  const desc =
+    [`**${title}**`, `by **${user}** at ${ts}`, "", (text || "").slice(0, 1200) + ((text?.length || 0) > 1200 ? "…" : "")]
+      .join("\n");
 
   return {
     content: null,
@@ -48,25 +68,25 @@ function toDiscordPayload(body: any) {
         url: link || undefined,
         timestamp: new Date().toISOString(),
         footer: { text: `Conversation ID: ${id}` },
-        fields: audio ? [{ name: "Audio", value: audio }] : [],
+        fields: audio ? [{ name: "Audio", value: String(audio) }] : [],
       },
     ],
   };
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  // Grab raw body for signature verification if Omi sends one
-  // Next.js doesn’t expose raw by default; for v1 we’ll accept parsed JSON.
-  // If Omi requires exact raw bytes, we’ll switch to an edge/middleware reader.
-
   if (req.method !== "POST") return res.status(405).send("method_not_allowed");
 
   try {
-    const raw = JSON.stringify(req.body || {});
+    // Use parsed JSON for now; switch to raw reader only if Omi requires exact-byte HMAC
+    const raw = JSON.stringify(req.body ?? {});
     if (!verifySignature(req, raw)) return res.status(401).send("invalid_signature");
     if (!DISCORD_WEBHOOK_URL) return res.status(500).send("missing_webhook");
 
-    const payload = toDiscordPayload(req.body || {});
+    // Cast safely to our interface
+    const body = asRecord(req.body) as OmiPayload;
+
+    const payload = toDiscordPayload(body);
     const r = await fetch(DISCORD_WEBHOOK_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
