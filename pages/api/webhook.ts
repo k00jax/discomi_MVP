@@ -45,99 +45,76 @@ function verifySignature(req: NextApiRequest, rawBody: string): boolean {
   }
 }
 
-// ---------- Extractors ----------
-function extractFields(bodyUnknown: unknown) {
-  const b = isObj(bodyUnknown) ? bodyUnknown : {};
+// ---------- Extractors tuned for Omi memory JSON ----------
+type Seg = { text?: string };
+type Structured = {
+  title?: string;
+  overview?: string;
+  emoji?: string;
+  category?: string;
+  action_items?: unknown[];
+  events?: unknown[];
+};
 
-  // Prefer your prior FongerBot shape first
-  const id = pickStr(
-    get(b,"conversation_id"),
-    get(b,"id"),
-    get(get(b,"conversation"),"id"),
-    get(get(b,"memory"),"id")
-  ) || "unknown";
+function extractFromOmiMemory(b: Record<string, unknown>) {
+  const structured = (b["structured"] as Structured) || {};
+  const segments = (b["transcript_segments"] as Seg[]) || [];
 
-  const title = pickStr(
-    get(b,"title"),
-    get(b,"summary"),
-    get(get(b,"conversation"),"title"),
-    get(get(b,"memory"),"title")
-  ) || "New Omi memory";
+  const id =
+    String(b["id"] ?? b["conversation_id"] ?? (b as any)?.conversation?.id ?? (b as any)?.memory?.id ?? "unknown");
 
-  const text = pickStr(
-    get(b,"text"),
-    get(b,"content"),
-    get(b,"transcript"),
-    get(get(b,"memory"),"text"),
-    get(get(b,"memory"),"content"),
-    get(get(b,"conversation"),"summary"),
-    get(b,"message")
-  );
+  const created_at =
+    String(b["created_at"] ?? (b as any)?.memory?.created_at ?? (b as any)?.conversation?.created_at ?? new Date().toISOString());
 
-  const user = pickStr(
-    get(get(b,"user"),"name"),
-    get(b,"author"),
-    get(get(b,"account"),"name"),
-    get(get(b,"creator"),"name"),
-    get(get(b,"owner"),"name")
-  ) || "unknown";
+  // Prefer Omi's structured title/overview
+  const title =
+    structured.title?.trim() ||
+    String(b["title"] ?? (b as any)?.conversation?.title ?? (b as any)?.memory?.title ?? "New Omi memory");
 
-  const ts = pickStr(
-    get(b,"timestamp"),
-    get(b,"created_at"),
-    get(b,"createdAt"),
-    get(get(b,"memory"),"created_at"),
-    get(get(b,"conversation"),"created_at")
-  ) || new Date().toISOString();
+  let body =
+    structured.overview?.trim() ||
+    String(b["summary"] ?? (b as any)?.conversation?.summary ?? "");
 
-  const audio = pickStr(
-    get(b,"audio_url"),
-    get(get(b,"media"),"audio_url"),
-    get(get(b,"memory"),"audio_url")
-  );
+  // If overview/summary is empty, fall back to concatenated transcript
+  if (!body) {
+    const joined = segments.map(s => (s.text || "").trim()).filter(Boolean).join(" ");
+    body = joined || "(no text)";
+  }
 
-  const link = pickStr(
-    get(b,"url"),
-    get(b,"deep_link"),
-    get(get(b,"links"),"web"),
-    get(get(b,"conversation"),"url")
-  );
+  // Optional link/audio if present
+  const audio =
+    String((b as any)?.audio_url ?? (b as any)?.media?.audio_url ?? (b as any)?.memory?.audio_url ?? "") || undefined;
+  const link =
+    String((b as any)?.url ?? (b as any)?.deep_link ?? (b as any)?.links?.web ?? (b as any)?.conversation?.url ?? "") || undefined;
 
-  return { id, title, text, user, ts, audio, link };
+  return { id, title, body, created_at, audio, link };
 }
 
-function buildEmbed(bodyUnknown: unknown, fieldsExtra: Array<{name: string; value: string}> = []) {
-  const { id, title, text, user, ts, audio, link } = extractFields(bodyUnknown);
-
-  // Fail-soft text
-  const rawJson = (() => {
-    try { return typeof bodyUnknown === "string" ? bodyUnknown : JSON.stringify(bodyUnknown); }
-    catch { return String(bodyUnknown); }
-  })();
-  const textFinal = text || (rawJson ? rawJson : "(no text)");
+function toDiscordPayloadOmi(rawBody: unknown, uid?: string) {
+  const b = (rawBody && typeof rawBody === "object") ? (rawBody as Record<string, unknown>) : {};
+  const { id, title, body, created_at, audio, link } = extractFromOmiMemory(b);
 
   const limit = process.env.POST_FULL_TEXT === "true" ? 1900 : 400;
-  const bodyText = String(textFinal).slice(0, limit);
-
-  const fields: Array<{name: string; value: string}> = [];
-  if (audio) fields.push({ name: "Audio", value: String(audio) });
-  fields.push(...fieldsExtra);
+  const bodyText = body.slice(0, limit);
+  const footerExtra = uid ? ` • uid: ${uid}` : "";
 
   return {
     content: null,
-    embeds: [{
-      title: "New Omi Conversation",
-      description: [
-        `**${title}**`,
-        `by **${user}** at ${ts}`,
-        "",
-        bodyText + (String(textFinal).length > limit ? "…" : "")
-      ].join("\n"),
-      url: link || undefined,
-      timestamp: new Date().toISOString(),
-      footer: { text: `Conversation ID: ${id}` },
-      fields
-    }]
+    embeds: [
+      {
+        title: "New Omi Conversation",
+        description: [
+          `**${title}**`,
+          `at ${created_at}`,
+          "",
+          bodyText + (body.length > limit ? "…" : "")
+        ].join("\n"),
+        url: link || undefined,
+        timestamp: new Date().toISOString(),
+        footer: { text: `Conversation ID: ${id}${footerExtra}` },
+        fields: audio ? [{ name: "Audio", value: audio }] : [],
+      },
+    ],
   };
 }
 
@@ -190,25 +167,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       bodyUnknown = safeJsonParse(raw);
     }
 
-    // Force visible debug for this run so we SEE what Omi sent
-    const extra = [
-      { name: "Debug-CT",   value: ct || "(none)" },
-      { name: "Debug-Peek", value: "```" + String(typeof bodyUnknown === "string" ? bodyUnknown : JSON.stringify(bodyUnknown, null, 2)).slice(0, 400) + "```" }
-    ];
-    const discordPayload = buildEmbed(bodyUnknown, extra);
-
-    // Always include a short debug peek for live Omi hits (remove after mapping)
-    const ct = String(req.headers["content-type"] || "");
-    try {
-      const dbg = typeof bodyUnknown === "string"
-        ? bodyUnknown
-        : JSON.stringify(bodyUnknown, null, 2);
-      (discordPayload.embeds[0].fields ||= []).push(
-        { name: "Debug-CT", value: ct || "(none)" },
-        { name: "Debug-Peek", value: "```json\n" + dbg.slice(0, 400) + (dbg.length > 400 ? "…" : "") + "\n```" }
-      );
-    } catch {}
-
+    // Extract uid from query params if present (Omi appends ?uid=...)
+    const uid = typeof req.query?.uid === "string" ? req.query.uid : undefined;
+    const discordPayload = toDiscordPayloadOmi(bodyUnknown as unknown, uid);
 
     const r = await fetch(DISCORD_WEBHOOK_URL, {
       method: "POST",
