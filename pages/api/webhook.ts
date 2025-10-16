@@ -42,110 +42,6 @@ export const config = {
   },
 };
 
-// --- helpers ---
-function isObj(v: unknown): v is Record<string, unknown> { return !!v && typeof v === "object"; }
-function pickStr(...vals: unknown[]): string | undefined {
-  for (const v of vals) if (typeof v === "string" && v.trim()) return v.trim();
-  return undefined;
-}
-function path(o: unknown, keys: string[]): unknown {
-  let cur: unknown = o;
-  for (const k of keys) { if (!isObj(cur)) return undefined; cur = cur[k]; }
-  return cur;
-}
-
-// Extract across common shapes
-function extractFields(body: unknown) {
-  const b = isObj(body) ? body : {};
-
-  const id = pickStr(
-    b["id"], b["conversation_id"],
-    path(b, ["conversation","id"]), path(b, ["memory","id"]),
-    path(b, ["data","id"]), path(b, ["event","id"])
-  ) || "unknown";
-
-  const title = pickStr(
-    b["title"], b["summary"],
-    path(b, ["conversation","title"]), path(b, ["memory","title"]),
-    path(b, ["data","title"]), path(b, ["event","title"])
-  ) || "New Omi memory";
-
-  const text = pickStr(
-    b["text"], b["content"], b["transcript"],
-    path(b, ["memory","text"]), path(b, ["memory","content"]),
-    path(b, ["conversation","summary"]),
-    path(b, ["message"]), path(b, ["data","text"]),
-  ) || "(no text)";
-
-  const user = pickStr(
-    path(b, ["user","name"]),
-    path(b, ["user","display_name"]),
-    b["author"], path(b, ["account","name"]),
-    path(b, ["creator","name"]), path(b, ["owner","name"])
-  ) || "unknown";
-
-  const ts = pickStr(
-    b["created_at"], b["createdAt"],
-    path(b, ["memory","created_at"]), path(b, ["conversation","created_at"]),
-    b["timestamp"]
-  ) || new Date().toISOString();
-
-  const audio = pickStr(
-    b["audio_url"], path(b, ["media","audio_url"]),
-    path(b, ["memory","audio_url"])
-  );
-
-  const link = pickStr(
-    b["url"], b["deep_link"],
-    path(b, ["links","web"]), path(b, ["memory","url"]),
-    path(b, ["conversation","url"])
-  );
-
-  return { id, title, text, user, ts, audio, link };
-}
-
-function toDiscordPayload(rawBody: unknown) {
-  // Log top-level keys for one run
-  try {
-    const keys = isObj(rawBody) ? Object.keys(rawBody) : [];
-    console.log("[DiscOmi] inbound keys:", keys);
-  } catch {}
-
-  const { id, title, text, user, ts, audio, link } = extractFields(rawBody);
-
-  const raw = String(text || "");
-  const limit = process.env.POST_FULL_TEXT === "true" ? 1900 : 400;
-  const bodyText = raw.slice(0, limit);
-
-  const fields: Array<{name:string; value:string}> = [];
-  if (audio) fields.push({ name: "Audio", value: String(audio) });
-
-  // Optional debug: include first 900 chars of raw JSON so we can see the shape
-  if (process.env.DEBUG_RAW === "true") {
-    try {
-      const dbg = JSON.stringify(rawBody, null, 2);
-      fields.push({ name: "Debug", value: "```json\n" + dbg.slice(0, 900) + (dbg.length > 900 ? "…":"") + "\n```" });
-    } catch {}
-  }
-
-  return {
-    content: null,
-    embeds: [{
-      title: "New Omi Conversation",
-      description: [
-        `**${title}**`,
-        `by **${user}** at ${ts}`,
-        "",
-        bodyText + (raw.length > limit ? "…" : "")
-      ].join("\n"),
-      url: link || undefined,
-      timestamp: new Date().toISOString(),
-      footer: { text: `Conversation ID: ${id}` },
-      fields
-    }],
-  };
-}
-
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   // Always advertise what we accept
   res.setHeader("Allow", "POST, GET, HEAD, OPTIONS");
@@ -178,23 +74,112 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
 
   try {
-    // Using parsed JSON; switch to raw bytes only if Omi requires exact-byte HMAC
-    const raw = JSON.stringify(req.body ?? {});
-    if (!verifySignature(req, raw)) return res.status(401).send("invalid_signature");
-    if (!DISCORD_WEBHOOK_URL) return res.status(500).send("missing_webhook");
+    // Visibility
+    const ct = String(req.headers["content-type"] || "");
+    console.log("[DiscOmi] inbound", { method: req.method, ct, hasBody: !!req.body });
 
-    // toDiscordPayload now logs keys and handles debug mode internally
-    const payload = toDiscordPayload(req.body ?? {});
+    // Parse body across content types
+    let bodyUnknown: unknown = req.body;
+    if (typeof req.body === "string") {
+      try { bodyUnknown = JSON.parse(req.body); } catch { bodyUnknown = req.body; }
+    }
+
+    // Helper utils
+    const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object";
+    const pickStr = (...vals: unknown[]) => {
+      for (const v of vals) if (typeof v === "string" && v.trim()) return v.trim();
+      return undefined;
+    };
+    const path = (o: unknown, keys: string[]): unknown => {
+      let cur: unknown = o;
+      for (const k of keys) { if (!isObj(cur)) return undefined; cur = cur[k]; }
+      return cur;
+    };
+
+    // Try common Omi shapes and generic "data" envelopes
+    const b = isObj(bodyUnknown) ? bodyUnknown : {};
+    const envelope = (isObj(b.data) ? b.data : b) as Record<string, unknown>;
+
+    const id = pickStr(
+      envelope.id, envelope.conversation_id,
+      path(envelope, ["conversation","id"]), path(envelope, ["memory","id"])
+    ) || "unknown";
+
+    const title = pickStr(
+      envelope.title, envelope.summary,
+      path(envelope, ["conversation","title"]), path(envelope, ["memory","title"])
+    ) || "New Omi memory";
+
+    let text = pickStr(
+      envelope.text, envelope.content, envelope.transcript,
+      path(envelope, ["memory","text"]), path(envelope, ["memory","content"]),
+      path(envelope, ["conversation","summary"]), path(envelope, ["message"])
+    );
+
+    const user = pickStr(
+      path(envelope, ["user","name"]), path(envelope, ["user","display_name"]),
+      envelope.author, path(envelope, ["account","name"]),
+      path(envelope, ["creator","name"]), path(envelope, ["owner","name"])
+    ) || "unknown";
+
+    const ts = pickStr(
+      envelope.created_at, envelope.createdAt,
+      path(envelope, ["memory","created_at"]), path(envelope, ["conversation","created_at"]),
+      envelope.timestamp
+    ) || new Date().toISOString();
+
+    const audio = pickStr(
+      envelope.audio_url, path(envelope, ["media","audio_url"]),
+      path(envelope, ["memory","audio_url"])
+    );
+    const link = pickStr(
+      envelope.url, envelope.deep_link,
+      path(envelope, ["links","web"]), path(envelope, ["memory","url"]),
+      path(envelope, ["conversation","url"])
+    );
+
+    // Fail-soft: if no text, show first 400 chars of raw JSON
+    let debugField: { name: string; value: string } | undefined;
+    if (!text) {
+      const dbg = (() => { try { return JSON.stringify(bodyUnknown); } catch { return String(bodyUnknown); } })() || "";
+      text = dbg ? dbg.slice(0, 400) + (dbg.length > 400 ? "…" : "") : "(no text)";
+      debugField = { name: "Debug", value: "Payload keys: " + Object.keys(b).join(", ") };
+    }
+
+    // Description with length control
+    const raw = String(text || "");
+    const limit = process.env.POST_FULL_TEXT === "true" ? 1900 : 400;
+    const bodyText = raw.slice(0, limit);
+
+    const discordPayload = {
+      content: null,
+      embeds: [{
+        title: "New Omi Conversation",
+        description: [
+          `**${title}**`,
+          `by **${user}** at ${ts}`,
+          "",
+          bodyText + (raw.length > limit ? "…" : "")
+        ].join("\n"),
+        url: link || undefined,
+        timestamp: new Date().toISOString(),
+        footer: { text: `Conversation ID: ${id}` },
+        fields: [
+          ...(audio ? [{ name: "Audio", value: String(audio) }] : []),
+          ...(debugField ? [debugField] : []),
+        ]
+      }],
+    };
 
     const r = await fetch(DISCORD_WEBHOOK_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(discordPayload),
     });
 
     if (!r.ok) {
       const err = await r.text();
-      console.error("Discord error:", err);
+      console.error("Discord error:", r.status, err);
       return res.status(502).send("discord_error");
     }
     return res.status(200).send("ok");
