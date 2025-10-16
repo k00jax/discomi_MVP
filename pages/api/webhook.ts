@@ -86,8 +86,13 @@ function safeJsonParse(s: string): unknown {
 }
 
 function verifySignature(req: NextApiRequest, rawBody: string): boolean {
+  // If no secret configured, return true (development mode - allows testing without Omi)
+  // PRODUCTION: Always set OMI_SIGNING_SECRET to enforce signature verification
   if (!OMI_SIGNING_SECRET) return true;
+  
   const header = (req.headers["x-omi-signature"] as string) || "";
+  if (!header) return false; // Reject if signature expected but not provided
+  
   const hmac = crypto.createHmac("sha256", OMI_SIGNING_SECRET).update(rawBody).digest("hex");
   try {
     return crypto.timingSafeEqual(Buffer.from(header), Buffer.from(hmac));

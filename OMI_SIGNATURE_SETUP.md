@@ -9,6 +9,17 @@ DiscOmi now supports **Omi signature verification** so that official Omi app req
 
 ## Setting up OMI_SIGNING_SECRET
 
+⚠️ **IMPORTANT**: Without `OMI_SIGNING_SECRET` configured, the webhook runs in **development mode** where signature verification is permissive (always passes). This allows testing but is **not secure for production**. Always set `OMI_SIGNING_SECRET` in production environments.
+
+### Production security modes:
+
+| OMI_SIGNING_SECRET | Signature provided | Token provided | Result |
+|-------------------|-------------------|----------------|--------|
+| ❌ Not set | Any or none | Any or none | ✅ Passes (dev mode) |
+| ✅ Set | Valid | Not needed | ✅ Passes (Omi app) |
+| ✅ Set | None/invalid | Valid | ✅ Passes (manual test) |
+| ✅ Set | None/invalid | None/invalid | ❌ 401 unauthorized |
+
 ### 1. Get your signing secret from Omi
 
 Contact the Omi team or check your Omi developer dashboard for your `OMI_SIGNING_SECRET`. This is a shared secret used to verify that requests are genuinely from Omi.
