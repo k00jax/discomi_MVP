@@ -197,6 +197,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     ];
     const discordPayload = buildEmbed(bodyUnknown, extra);
 
+    // Always include a short debug peek for live Omi hits (remove after mapping)
+    const ct = String(req.headers["content-type"] || "");
+    try {
+      const dbg = typeof bodyUnknown === "string"
+        ? bodyUnknown
+        : JSON.stringify(bodyUnknown, null, 2);
+      (discordPayload.embeds[0].fields ||= []).push(
+        { name: "Debug-CT", value: ct || "(none)" },
+        { name: "Debug-Peek", value: "```json\n" + dbg.slice(0, 400) + (dbg.length > 400 ? "…" : "") + "\n```" }
+      );
+    } catch {}
+
+
     const r = await fetch(DISCORD_WEBHOOK_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
