@@ -11,6 +11,29 @@ const BUILD_ID = process.env.BUILD_ID || "unknown";
 // ---------- ENV ----------
 const OMI_SIGNING_SECRET = process.env.OMI_SIGNING_SECRET || "";
 
+// ---------- Branding ----------
+const OMI_ICON = process.env.NEXT_PUBLIC_OMI_ICON_URL || "https://i.imgur.com/6WZ1Q8j.png";
+const BOT_NAME = process.env.NEXT_PUBLIC_BOT_NAME || "DiscOmi";
+const BOT_AVATAR = process.env.NEXT_PUBLIC_BOT_AVATAR_URL || OMI_ICON;
+
+// ---------- Category mapping ----------
+const CAT_EMOJI: Record<string, string> = { 
+  personal: "🧠", 
+  work: "💼", 
+  meeting: "📅", 
+  task: "✅", 
+  idea: "💡", 
+  default: "🎧" 
+};
+const CAT_COLOR: Record<string, number> = { 
+  personal: 0x6c5ce7, 
+  work: 0x0984e3, 
+  meeting: 0x00b894, 
+  task: 0x55efc4, 
+  idea: 0xfdcb6e, 
+  default: 0x8e8e93 
+};
+
 // ---------- Typed helpers ----------
 type UnknownRec = Record<string, unknown>;
 const asRec = (v: unknown): UnknownRec =>
@@ -41,6 +64,14 @@ function pickSN(...vals: unknown[]): string | undefined {
   }
   return undefined;
 }
+
+// Discord timestamp helpers
+const toUnix = (iso: string) => Math.floor(new Date(iso).getTime() / 1000);
+const whenBlock = (iso: string) => {
+  const ts = toUnix(iso);
+  return `<t:${ts}:f> • <t:${ts}:R>`; // "Oct 16, 1:26 PM • 2m ago"
+};
+const clamp = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
 async function readRawBody(req: NextApiRequest): Promise<string> {
   const chunks: Buffer[] = [];
@@ -122,6 +153,28 @@ function extractFromOmiMemory(body: unknown) {
       asRec(b["conversation"])["url"]
     ) || undefined;
 
+  // Extract category, language, status, source
+  const category =
+    str(asRec(structured)["category"]) ||
+    str(asRec(b["conversation"])["category"]) || "default";
+
+  const language = str(b["language"]) || str(asRec(structured)["language"]);
+  const status = str(b["status"]);
+  const source = str(b["source"]); // e.g., "omi_necklace"
+
+  // Geolocation → friendly string if available
+  const geo = asRec(b["geolocation"]);
+  const city = str(geo["city"]);
+  const country = str(geo["country"]);
+  const locationLabel = [city, country].filter(Boolean).join(", ") || undefined;
+
+  // Photos → use first photo URL if present
+  let thumb: string | undefined = undefined;
+  if (Array.isArray(b["photos"]) && b["photos"].length > 0) {
+    const first = asRec(b["photos"][0]);
+    thumb = str(first["url"]) || str(first["image_url"]) || undefined;
+  }
+
   return {
     id,
     title,
@@ -129,38 +182,66 @@ function extractFromOmiMemory(body: unknown) {
     created_at,
     audio,
     link,
+    category,
+    language,
+    status,
+    source,
+    locationLabel,
+    thumb,
   };
 }
 
 function toDiscordPayloadOmi(rawBody: unknown, uid?: string, options?: UserConfig["options"]) {
-  const { id, title, body, created_at, audio, link } = extractFromOmiMemory(rawBody);
+  const data = extractFromOmiMemory(rawBody);
+  const { id, title, body, created_at, link, category, language, status, source, locationLabel, thumb } = data;
 
-  const limit = options?.maxChars ?? (process.env.POST_FULL_TEXT === "true" ? 1900 : 400);
-  const footerExtra = uid ? ` • uid: ${uid}` : "";
+  const cat = (category || "default").toLowerCase();
+  const emoji = CAT_EMOJI[cat] || CAT_EMOJI.default;
+  const color = CAT_COLOR[cat] || CAT_COLOR.default;
 
-  // Build fields array conditionally
-  const fields: Array<{ name: string; value: string }> = [];
-  if (options?.includeAudio !== false && audio) {
-    fields.push({ name: "Audio", value: audio });
-  }
+  const limit = options?.maxChars ?? (process.env.POST_FULL_TEXT === "true" ? 1900 : 900);
+  const desc = clamp(body, limit);
+
+  // Build fields with metadata
+  const fields: Array<{ name: string; value: string; inline?: boolean }> = [
+    { name: "When", value: whenBlock(created_at), inline: true },
+    { name: "Category", value: cat, inline: true },
+  ];
+  if (locationLabel) fields.push({ name: "Location", value: locationLabel, inline: true });
+  if (language) fields.push({ name: "Language", value: language, inline: true });
+  if (source) fields.push({ name: "Source", value: source, inline: true });
+  if (status) fields.push({ name: "Status", value: status, inline: true });
+
+  // Optional "Open in Omi" button if we have a link
+  const components = link ? [{
+    type: 1,
+    components: [
+      { type: 2, style: 5, label: "Open in Omi", url: link } // style 5 = link button
+    ]
+  }] : undefined;
+
+  // Show uid in footer only when DEBUG is enabled
+  const DEBUG = String(process.env.DEBUG || "").toLowerCase() === "true";
+  const footerText = `Conversation • ${id}${DEBUG && uid ? ` • uid:${uid}` : ""}`;
 
   return {
+    username: BOT_NAME,
+    avatar_url: BOT_AVATAR,
     content: null,
     embeds: [
       {
-        title: "New Omi Conversation",
-        description: [
-          `**${title}**`,
-          `at ${created_at}`,
-          "",
-          body.slice(0, limit) + (body.length > limit ? "…" : ""),
-        ].join("\n"),
+        title: `${emoji} ${title}`,
+        description: desc,
+        color,
         url: link || undefined,
         timestamp: new Date().toISOString(),
-        footer: { text: `Conversation ID: ${id}${footerExtra}` },
+        author: { name: "Omi", icon_url: OMI_ICON },
+        footer: { text: footerText, icon_url: OMI_ICON },
         fields,
+        thumbnail: thumb ? { url: thumb } : undefined,
       },
     ],
+    components,
   };
 }
 
