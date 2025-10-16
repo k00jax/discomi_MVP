@@ -1,4 +1,5 @@
-import type { GetServerSideProps } from "next";
+﻿import type { GetServerSideProps } from "next";
+import Link from "next/link";
 
 type Props = { build: string };
 
@@ -11,17 +12,18 @@ export default function Home({ build }: Props) {
   return (
     <main style={{fontFamily:"ui-sans-serif,system-ui",padding:"2rem",maxWidth:780,margin:"0 auto"}}>
       <h1>DiscOmi</h1>
-      <p>Omi → Discord relay is deployed and listening.</p>
+      <p>Omi â†’ Discord relay is deployed and listening.</p>
 
       <ul>
-        <li><a href="/api/setup-complete" rel="noreferrer">Setup check</a> (should return JSON)</li>
-        <li><a href="/api/webhook" rel="noreferrer">Webhook GET</a> (should return “ok” or 405 if POST-only)</li>
+        <li><Link href="/api/setup-complete">Setup check</Link></li>
+        <li><Link href="/api/webhook">Webhook GET</Link></li>
+        <li><Link href="/api/version">Version</Link></li>
       </ul>
 
       <h3>Environment sanity</h3>
       <p>
         These are required and should be set in Vercel:
-        <code> DISCORD_WEBHOOK_URL </code> · <code> WEBHOOK_TOKEN </code>
+        <code> DISCORD_WEBHOOK_URL </code> Â· <code> WEBHOOK_TOKEN </code>
       </p>
 
       <small style={{opacity:.7}}>Build: {build}</small>
