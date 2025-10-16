@@ -1,41 +1,77 @@
-﻿import type { GetServerSideProps } from "next";
-import Link from "next/link";
+﻿import Link from "next/link";
 
-type Props = { build: string };
-
-export const getServerSideProps: GetServerSideProps<Props> = async () => {
-  return { props: { build: process.env.BUILD_ID || "unknown" } };
-};
-
-export default function Home({ build }: Props) {
+export default function Home() {
+  const build = process.env.BUILD_ID || "unknown";
   return (
-    <main style={{fontFamily:"ui-sans-serif,system-ui",padding:"2rem",maxWidth:780,margin:"0 auto"}}>
-      <h1>DiscOmi</h1>
-      <p>Posts your Omi memories to your Discord channel. Per-user token. Nothing stored. Supports titles, overviews, transcripts, audio.</p>
+    <main
+      style={{
+        fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif",
+        padding: 24,
+        lineHeight: 1.5,
+        maxWidth: 820,
+        margin: "0 auto",
+      }}
+    >
+      <header style={{ display: "flex", alignItems: "center", gap: 16 }}>
+        <img
+          src="/discomi.png"
+          alt="DiscOmi bot avatar"
+          width={64}
+          height={64}
+          style={{ borderRadius: 12, boxShadow: "0 2px 8px rgba(0,0,0,0.15)" }}
+        />
+        <div>
+          <h1 style={{ margin: 0, fontSize: 32 }}>DiscOmi</h1>
+          <p style={{ margin: "6px 0 0 0", color: "#555" }}>
+            Posts your Omi memories to your Discord channel. Per-user token. Nothing stored.
+          </p>
+        </div>
+      </header>
 
-      <h3>Get Started</h3>
-      <ul>
-        <li><Link href="/setup">ðŸš€ Setup Your Webhook</Link> - Register and get your personal Omi URL</li>
-      </ul>
+      <section style={{ marginTop: 24 }}>
+        <h2 style={{ fontSize: 20, marginBottom: 8 }}>Get Started</h2>
+        <ol style={{ marginTop: 0 }}>
+          <li>
+            <strong>Register</strong> to get your personal Omi webhook URL:
+            {" "}
+            <Link href="/api/register"><code>/api/register</code></Link>
+            {" "} (POST with <code>{{"{"}} uid, webhookUrl {{ "}" }}</code>)
+          </li>
+          <li>
+            Paste the returned URL into Omi. Omi will append your <code>uid</code> when it calls us.
+          </li>
+        </ol>
+      </section>
 
-      <h3>API Endpoints</h3>
-      <ul>
-        <li><Link href="/api/setup-complete">Setup check</Link></li>
-        <li><Link href="/api/webhook">Webhook endpoint</Link></li>
-        <li><Link href="/api/version">Version info</Link></li>
-      </ul>
+      <section style={{ marginTop: 24 }}>
+        <h2 style={{ fontSize: 20, marginBottom: 8 }}>API Endpoints</h2>
+        <ul style={{ marginTop: 0 }}>
+          <li>
+            Setup check: <Link href="/api/setup-complete"><code>/api/setup-complete</code></Link>
+          </li>
+          <li>
+            Webhook endpoint: <code>/api/webhook?token=…</code> (Omi adds <code>&amp;uid=…</code>)
+          </li>
+          <li>
+            Version info: <Link href="/api/version"><code>/api/version</code></Link>
+          </li>
+        </ul>
+      </section>
 
-      <h3>Features</h3>
-      <ul>
-        <li>âœ… Per-user Discord webhooks</li>
-        <li>âœ… Secure token authentication</li>
-        <li>âœ… Extracts titles, overviews, and transcripts from Omi memories</li>
-        <li>âœ… Optional audio links</li>
-        <li>âœ… Configurable text length limits</li>
-        <li>âœ… No data storage - direct relay only</li>
-      </ul>
+      <section style={{ marginTop: 24 }}>
+        <h2 style={{ fontSize: 20, marginBottom: 8 }}>Features</h2>
+        <ul style={{ marginTop: 0 }}>
+          <li>✔ Per-user Discord webhooks</li>
+          <li>✔ Secure token authentication</li>
+          <li>✔ Extracts titles and overviews from Omi memories</li>
+          <li>✔ No data storage — direct relay only</li>
+          <li>✔ Supabase-backed multi-tenant routing</li>
+        </ul>
+      </section>
 
-      <small style={{opacity:.7}}>Build: {build}</small>
+      <p style={{ marginTop: 32, color: "#666" }}>
+        Build: <code>{build}</code>
+      </p>
     </main>
   );
 }
