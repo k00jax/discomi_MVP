@@ -42,106 +42,107 @@ export const config = {
   },
 };
 
-// --- helpers to safely read unknown payloads ---
-function isObj(v: unknown): v is Record<string, unknown> {
-  return !!v && typeof v === "object";
-}
+// --- helpers ---
+function isObj(v: unknown): v is Record<string, unknown> { return !!v && typeof v === "object"; }
 function pickStr(...vals: unknown[]): string | undefined {
   for (const v of vals) if (typeof v === "string" && v.trim()) return v.trim();
   return undefined;
 }
 function path(o: unknown, keys: string[]): unknown {
   let cur: unknown = o;
-  for (const k of keys) {
-    if (!isObj(cur)) return undefined;
-    cur = cur[k];
-  }
+  for (const k of keys) { if (!isObj(cur)) return undefined; cur = cur[k]; }
   return cur;
 }
 
-// Extract the most likely fields from various Omi shapes
+// Extract across common shapes
 function extractFields(body: unknown) {
   const b = isObj(body) ? body : {};
 
   const id = pickStr(
-    (b.id as string),
-    (b["conversation_id"] as string),
-    path(b, ["conversation", "id"]) as string,
-    path(b, ["memory", "id"]) as string,
+    b["id"], b["conversation_id"],
+    path(b, ["conversation","id"]), path(b, ["memory","id"]),
+    path(b, ["data","id"]), path(b, ["event","id"])
   ) || "unknown";
 
   const title = pickStr(
-    (b["title"] as string),
-    (b["summary"] as string),
-    path(b, ["conversation", "title"]) as string,
-    path(b, ["memory", "title"]) as string,
+    b["title"], b["summary"],
+    path(b, ["conversation","title"]), path(b, ["memory","title"]),
+    path(b, ["data","title"]), path(b, ["event","title"])
   ) || "New Omi memory";
 
   const text = pickStr(
-    (b["text"] as string),
-    (b["content"] as string),
-    (b["transcript"] as string),
-    path(b, ["memory", "text"]) as string,
-    path(b, ["memory", "content"]) as string,
-    path(b, ["message"]) as string,
+    b["text"], b["content"], b["transcript"],
+    path(b, ["memory","text"]), path(b, ["memory","content"]),
+    path(b, ["conversation","summary"]),
+    path(b, ["message"]), path(b, ["data","text"]),
   ) || "(no text)";
 
   const user = pickStr(
-    path(b, ["user", "name"]) as string,
-    (b["author"] as string),
-    path(b, ["account", "name"]) as string,
-    path(b, ["creator", "name"]) as string,
-    path(b, ["owner", "name"]) as string,
+    path(b, ["user","name"]),
+    path(b, ["user","display_name"]),
+    b["author"], path(b, ["account","name"]),
+    path(b, ["creator","name"]), path(b, ["owner","name"])
   ) || "unknown";
 
   const ts = pickStr(
-    (b["created_at"] as string),
-    (b["createdAt"] as string),
-    path(b, ["memory", "created_at"]) as string,
-    path(b, ["conversation", "created_at"]) as string,
+    b["created_at"], b["createdAt"],
+    path(b, ["memory","created_at"]), path(b, ["conversation","created_at"]),
+    b["timestamp"]
   ) || new Date().toISOString();
 
   const audio = pickStr(
-    (b["audio_url"] as string),
-    path(b, ["media", "audio_url"]) as string,
-    path(b, ["memory", "audio_url"]) as string,
+    b["audio_url"], path(b, ["media","audio_url"]),
+    path(b, ["memory","audio_url"])
   );
 
   const link = pickStr(
-    (b["url"] as string),
-    (b["deep_link"] as string),
-    path(b, ["links", "web"]) as string,
-    path(b, ["memory", "url"]) as string,
+    b["url"], b["deep_link"],
+    path(b, ["links","web"]), path(b, ["memory","url"]),
+    path(b, ["conversation","url"])
   );
 
   return { id, title, text, user, ts, audio, link };
 }
 
-function toDiscordPayload(rawBody: OmiPayload | unknown) {
+function toDiscordPayload(rawBody: unknown) {
+  // Log top-level keys for one run
+  try {
+    const keys = isObj(rawBody) ? Object.keys(rawBody) : [];
+    console.log("[DiscOmi] inbound keys:", keys);
+  } catch {}
+
   const { id, title, text, user, ts, audio, link } = extractFields(rawBody);
 
   const raw = String(text || "");
   const limit = process.env.POST_FULL_TEXT === "true" ? 1900 : 400;
   const bodyText = raw.slice(0, limit);
-  const desc = [
-    `**${title}**`,
-    `by **${user}** at ${ts}`,
-    "",
-    bodyText + (raw.length > limit ? "…" : "")
-  ].join("\n");
+
+  const fields: Array<{name:string; value:string}> = [];
+  if (audio) fields.push({ name: "Audio", value: String(audio) });
+
+  // Optional debug: include first 900 chars of raw JSON so we can see the shape
+  if (process.env.DEBUG_RAW === "true") {
+    try {
+      const dbg = JSON.stringify(rawBody, null, 2);
+      fields.push({ name: "Debug", value: "```json\n" + dbg.slice(0, 900) + (dbg.length > 900 ? "…":"") + "\n```" });
+    } catch {}
+  }
 
   return {
     content: null,
-    embeds: [
-      {
-        title: "New Omi Conversation",
-        description: desc,
-        url: link || undefined,
-        timestamp: new Date().toISOString(),
-        footer: { text: `Conversation ID: ${id}` },
-        fields: audio ? [{ name: "Audio", value: String(audio) }] : [],
-      },
-    ],
+    embeds: [{
+      title: "New Omi Conversation",
+      description: [
+        `**${title}**`,
+        `by **${user}** at ${ts}`,
+        "",
+        bodyText + (raw.length > limit ? "…" : "")
+      ].join("\n"),
+      url: link || undefined,
+      timestamp: new Date().toISOString(),
+      footer: { text: `Conversation ID: ${id}` },
+      fields
+    }],
   };
 }
 
@@ -177,14 +178,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
 
   try {
-    console.log("[DiscOmi] inbound keys:", Object.keys(req.body || {}));
     // Using parsed JSON; switch to raw bytes only if Omi requires exact-byte HMAC
     const raw = JSON.stringify(req.body ?? {});
     if (!verifySignature(req, raw)) return res.status(401).send("invalid_signature");
     if (!DISCORD_WEBHOOK_URL) return res.status(500).send("missing_webhook");
 
-    // Narrow to our known shape
-    const payload = toDiscordPayload((req.body ?? {}) as OmiPayload);
+    // toDiscordPayload now logs keys and handles debug mode internally
+    const payload = toDiscordPayload(req.body ?? {});
 
     const r = await fetch(DISCORD_WEBHOOK_URL, {
       method: "POST",
