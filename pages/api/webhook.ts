@@ -171,6 +171,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const uid = typeof req.query?.uid === "string" ? req.query.uid : undefined;
     const discordPayload = toDiscordPayloadOmi(bodyUnknown as unknown, uid);
 
+    // Force visible debug for one run to see what's being parsed
+    const b = (typeof bodyUnknown === "object" && bodyUnknown) ? (bodyUnknown as Record<string, unknown>) : {};
+    const hasStructured = Object.prototype.hasOwnProperty.call(b, "structured");
+    const keys = Object.keys(b).slice(0, 20).join(", ");
+
+    (discordPayload.embeds[0].fields ||= []).push(
+      { name: "Debug-Keys", value: keys || "(no keys)" },
+      { name: "Debug-structured?", value: String(hasStructured) }
+    );
+
     const r = await fetch(DISCORD_WEBHOOK_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
