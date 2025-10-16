@@ -217,6 +217,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method !== "POST")  return res.status(405).send("method_not_allowed");
 
   try {
+    // ========== APP-LEVEL TOKEN GATE ==========
+    // Prevents replay attacks and ensures only Omi (with the token) can call this endpoint
+    const requireApp = String(process.env.REQUIRE_APP_TOKEN || "false").toLowerCase() === "true";
+    const appParam = (req.query.app as string) || "";
+    const appEnv = process.env.APP_WEBHOOK_TOKEN || "";
+
+    if (requireApp) {
+      // Strict mode: app token is mandatory
+      if (!appEnv || appParam !== appEnv) {
+        return res.status(401).send("unauthorized");
+      }
+    } else {
+      // Soft mode: if app token is provided, validate it (helps catch typos during setup)
+      if (appParam && appEnv && appParam !== appEnv) {
+        return res.status(401).send("unauthorized");
+      }
+    }
+    // ==========================================
+
     // Read raw bytes no matter the content-type
     const raw = await readRawBody(req);
     const ct  = String(req.headers["content-type"] || "");
