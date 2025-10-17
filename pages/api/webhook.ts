@@ -332,6 +332,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // Log build and parsed keys for debugging
     console.log("[DiscOmi] build", BUILD_ID, "keys:", typeof bodyUnknown === "object" && bodyUnknown ? Object.keys(bodyUnknown as UnknownRec) : "(not object)");
+    
+    // Debug: Log full payload structure for troubleshooting
+    if (process.env.DEBUG === "true") {
+      console.log("[DiscOmi] Full payload:", JSON.stringify(bodyUnknown, null, 2));
+    }
 
     // Build Discord payload with uid
     const discordPayload = toDiscordPayloadOmi(bodyUnknown, uid);
