@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import Image from "next/image";
 import s from "@/styles/Setup.module.css";
 
 export default function Setup() {
@@ -29,14 +28,14 @@ export default function Setup() {
   return (
     <main className={s.container}>
       <section className={s.card}>
-        <div className={s.logoWrap}>
-          <Image
+        <div className={s.logo}>
+          <img
             src="/discomi.png"
             alt="DiscOmi"
-            fill
-            priority
-            sizes="128px"
-            style={{ objectFit: "cover" }}
+            width={120}
+            height={120}
+            loading="eager"
+            decoding="async"
           />
         </div>
 

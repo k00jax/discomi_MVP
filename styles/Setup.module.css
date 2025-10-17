@@ -4,7 +4,7 @@
   color: #eaeaea;
   display: grid;
   place-items: start center;
-  padding: 28px 18px 56px;
+  padding: 24px 16px 56px;
 }
 
 .card {
@@ -12,27 +12,32 @@
   max-width: 560px;
 }
 
-.logoWrap {
-  width: 128px;
-  height: 128px;
+.logo {
+  display: flex;
+  justify-content: center;
+  align-items: center;
   margin: 8px auto 16px;
+}
+
+.logo img {
+  width: 120px;
+  height: 120px;
   border-radius: 24px;
-  overflow: hidden;
+  object-fit: cover;
   box-shadow: 0 8px 32px rgba(0,0,0,.35);
 }
 
 .title {
-  font-size: 40px;
-  line-height: 1.1;
+  font-size: 32px;
+  line-height: 1.15;
   font-weight: 800;
-  text-align: left;
-  margin: 8px 0 8px;
+  margin: 6px 0 8px;
 }
 
 .lead {
   opacity: .9;
-  font-size: 18px;
-  margin: 0 0 18px;
+  font-size: 16px;
+  margin: 0 0 14px;
 }
 
 .field {
