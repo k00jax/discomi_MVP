@@ -382,17 +382,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const b = asRec(bodyUnknown);
     const isTranscriptProcessed = b["session_id"] && Array.isArray(b["segments"]);
     
+    console.log("[DiscOmi] Batching check - isTranscript:", isTranscriptProcessed, "batchEnabled:", BATCH_TRANSCRIPTS);
+    
     if (isTranscriptProcessed && BATCH_TRANSCRIPTS) {
       const sessionId = str(b["session_id"]) || "unknown";
       const segments = b["segments"] as unknown[];
       
-      console.log("[DiscOmi] Transcript session:", sessionId, "| segments count:", segments.length);
+      console.log("[DiscOmi] BATCHING MODE - session:", sessionId, "| segments:", segments.length);
       
-      // Add each segment to the session
-      for (const seg of segments) {
-        const segment = asRec(seg);
-        const { shouldPost, session } = await addSegmentToSession(sessionId, uid, {
-          text: str(segment.text) || "",
+      try {
+        // Add each segment to the session
+        for (const seg of segments) {
+          const segment = asRec(seg);
+          const { shouldPost, session } = await addSegmentToSession(sessionId, uid, {
+            text: str(segment.text) || "",
           timestamp: str(segment.timestamp),
           speaker: str(segment.speaker),
         });
@@ -441,6 +444,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       
       // Segment added to batch, but not ready to post yet
       return res.status(200).send("ok_batched");
+    } catch (batchError) {
+      console.error("[DiscOmi] Batching error:", batchError);
+      // Fall through to normal processing if batching fails
+    }
     }
 
     // Build Discord payload with uid (non-batched)
