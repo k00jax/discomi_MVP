@@ -4,7 +4,11 @@ import { supabaseAdmin } from "../../lib/supabase";
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const uid = req.query.uid as string | undefined;
   
+  // Log for debugging
+  console.log("[setup-complete] Received UID:", uid || "(none)");
+  
   if (!uid) {
+    console.log("[setup-complete] No UID provided, returning false");
     return res.status(200).json({ is_setup_completed: false });
   }
 
@@ -16,6 +20,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     .single();
 
   const isSetup = !error && cfg && cfg.webhook_url && cfg.webhook_url.trim().length > 0;
+  
+  console.log("[setup-complete] UID:", uid, "isSetup:", isSetup);
 
   return res.status(200).json({ is_setup_completed: isSetup });
 }
