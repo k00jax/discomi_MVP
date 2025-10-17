@@ -189,22 +189,37 @@ function toDiscordPayloadOmi(rawBody: unknown, uid?: string) {
   };
 }
 
-// Helper to extract uid from query or body
-function pickUid(query: NextApiRequest["query"], body: unknown): string | undefined {
-  // First try query string (Omi appends ?uid=...)
-  if (typeof query.uid === "string" && query.uid.trim()) {
-    return query.uid.trim();
+// Helper to extract uid from query, headers, or body (forgiving for store-installed apps)
+function pickUidLoose(req: NextApiRequest, body: any): string | undefined {
+  // 1) Query string (developer webhook or templated URL)
+  const q = (req.query.uid as string | undefined) || (req.query.user_id as string | undefined);
+  if (q && String(q).trim()) return String(q).trim();
+
+  // 2) Common headers some platforms set
+  const hx = (req.headers["x-omi-user-id"] as string | undefined)
+          || (req.headers["x-user-id"] as string | undefined);
+  if (hx && String(hx).trim()) return String(hx).trim();
+
+  // 3) Body paths we've seen in Omi payloads (comprehensive search)
+  const b = asRec(body);
+  const candidates: unknown[] = [
+    b["uid"],
+    b["user_id"],
+    b["userId"],
+    asRec(b["user"])["id"],
+    asRec(b["account"])["id"],
+    asRec(b["owner"])["id"],
+    asRec(b["creator"])["id"],
+    asRec(asRec(b["external_data"])["user"])["id"],
+    asRec(b["conversation"])["user_id"],
+    asRec(b["structured"])["user_id"],
+  ];
+  
+  for (const v of candidates) {
+    if (typeof v === "string" && v.trim()) return v.trim();
   }
   
-  // Fallback: look in body
-  const b = asRec(body);
-  return (
-    str(b["uid"]) ||
-    str(asRec(b["user"])["id"]) ||
-    str(asRec(b["account"])["id"]) ||
-    str(b["user_id"]) ||
-    str(b["userId"])
-  );
+  return undefined;
 }
 
 // ---------- Handler ----------
@@ -265,8 +280,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       bodyUnknown = safeJsonParse(raw);
     }
 
-    // Multi-tenant safeguards: require uid from query or body
-    const uid = pickUid(req.query, bodyUnknown);
+    // Multi-tenant safeguards: require uid from query, headers, or body
+    let uid = pickUidLoose(req, bodyUnknown);
+    
+    // ⚠️ Test-only fallback: if no UID found and exactly one user exists, use it
+    // This helps with store-installed apps where Omi might not append uid
+    if (!uid) {
+      try {
+        const { data: rows, error } = await supabaseAdmin
+          .from("user_configs")
+          .select("uid");
+        
+        if (!error && rows && rows.length === 1) {
+          uid = rows[0].uid;
+          console.log("[DiscOmi] Single-user fallback: using uid", uid);
+        }
+      } catch (fallbackErr) {
+        console.error("[DiscOmi] Fallback error:", fallbackErr);
+      }
+    }
+    
     if (!uid) return res.status(400).send("missing_uid");
 
     // Verify Omi signature (uses OMI_SIGNING_SECRET and x-omi-signature header)
