@@ -396,12 +396,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     console.log("[DiscOmi] Batching check - isTranscript:", isTranscriptProcessed, "batchEnabled:", BATCH_TRANSCRIPTS);
     
     if (isTranscriptProcessed && BATCH_TRANSCRIPTS) {
-      const sessionId = str(b["session_id"]) || "unknown";
+      // Omi sends UID as session_id, which causes duplicates
+      // We'll find or create an active session for this user
       const segments = b["segments"] as unknown[];
       
-      console.log("[DiscOmi] BATCHING MODE - session:", sessionId, "| segments:", segments.length);
+      console.log("[DiscOmi] BATCHING MODE - uid:", uid, "| segments:", segments.length);
       
       try {
+        // Find or create active session for this user
+        const { findOrCreateActiveSession } = await import("./batch-transcripts");
+        const sessionId = await findOrCreateActiveSession(uid);
+        
+        console.log("[DiscOmi] Using session:", sessionId);
+        
         // Add each segment to the session
         for (const seg of segments) {
           const segment = asRec(seg);

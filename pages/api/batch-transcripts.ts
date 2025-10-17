@@ -29,6 +29,30 @@ interface TranscriptSession {
 }
 
 /**
+ * Find or create an active session for a user
+ * Returns the most recent unposted session, or creates a new one
+ */
+export async function findOrCreateActiveSession(uid: string): Promise<string> {
+  // Look for most recent unposted session for this user
+  const { data: existing } = await supabaseAdmin
+    .from("transcript_sessions")
+    .select("session_id")
+    .eq("uid", uid)
+    .eq("posted", false)
+    .order("last_segment_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existing) {
+    return existing.session_id;
+  }
+
+  // Create new session ID: uid + timestamp
+  const sessionId = `${uid}_${Date.now()}`;
+  return sessionId;
+}
+
+/**
  * Add a segment to a session (creates session if needed)
  */
 export async function addSegmentToSession(
