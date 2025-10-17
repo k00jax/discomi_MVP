@@ -419,10 +419,39 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         });
         
         if (shouldPost && session) {
-          console.log(`[DiscOmi] Posting batched session ${sessionId} with ${session.segments.length} segments`);
+          console.log(`[DiscOmi] Posting batched session ${sessionId} with ${session.segments.length} total segments`);
           
-          // Combine all segments into one message
-          const combinedText = session.segments
+          // Apply lookback window to prevent posting hours of old conversation
+          const LOOKBACK_MINUTES = parseInt(process.env.LOOKBACK_MINUTES || "15");
+          const LOOKBACK_SEGMENTS = parseInt(process.env.LOOKBACK_SEGMENTS || "100");
+          const lookbackTime = new Date(Date.now() - LOOKBACK_MINUTES * 60 * 1000).toISOString();
+          
+          // Filter to recent segments only (within time window OR last N segments, whichever is more restrictive)
+          let segmentsToPost = session.segments;
+          
+          // Time-based filter: only segments from last N minutes
+          const recentByTime = session.segments.filter((s, i) => {
+            // Use segment timestamp if available, otherwise use position (newer segments at end)
+            const segmentTime = s.timestamp || session.first_segment_at;
+            return segmentTime >= lookbackTime;
+          });
+          
+          // Segment count filter: only last N segments
+          const recentByCount = session.segments.slice(-LOOKBACK_SEGMENTS);
+          
+          // Use whichever is MORE restrictive (fewer segments)
+          segmentsToPost = recentByTime.length < recentByCount.length ? recentByTime : recentByCount;
+          
+          // Fallback: if filters removed everything, use last 10 segments minimum
+          if (segmentsToPost.length === 0 && session.segments.length > 0) {
+            segmentsToPost = session.segments.slice(-10);
+            console.log(`[DiscOmi] Lookback filters too restrictive, using last 10 segments`);
+          }
+          
+          console.log(`[DiscOmi] Posting ${segmentsToPost.length} segments (filtered from ${session.segments.length} by ${LOOKBACK_MINUTES}min lookback)`);
+          
+          // Combine filtered segments into one message
+          const combinedText = segmentsToPost
             .map((s) => s.text)
             .filter(Boolean)
             .join(" ");
