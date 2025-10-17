@@ -24,6 +24,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     uid: String(uid),
     webhook_url: String(webhookUrl),
     token,
+    custom_entities: req.body?.custom_entities || undefined,
     options: {
       includeTranscript: Boolean(req.body?.options?.includeTranscript ?? true),
       maxChars: Math.min(Number(req.body?.options?.maxChars ?? 900), 1900),

@@ -8,6 +8,51 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+export interface CustomEntities {
+  names?: Record<string, string>;
+  companies?: Record<string, string>;
+  places?: Record<string, string>;
+}
+
+/**
+ * Apply custom entity corrections to transcript text
+ * Replaces misheard names/terms with correct versions
+ */
+export function applyEntityCorrections(
+  transcript: string,
+  customEntities: CustomEntities | null
+): string {
+  if (!customEntities) return transcript;
+
+  let corrected = transcript;
+
+  // Apply name corrections (case-insensitive)
+  if (customEntities.names) {
+    Object.entries(customEntities.names).forEach(([incorrect, correct]) => {
+      const regex = new RegExp(`\\b${incorrect}\\b`, "gi");
+      corrected = corrected.replace(regex, correct);
+    });
+  }
+
+  // Apply company name corrections
+  if (customEntities.companies) {
+    Object.entries(customEntities.companies).forEach(([incorrect, correct]) => {
+      const regex = new RegExp(`\\b${incorrect}\\b`, "gi");
+      corrected = corrected.replace(regex, correct);
+    });
+  }
+
+  // Apply place name corrections
+  if (customEntities.places) {
+    Object.entries(customEntities.places).forEach(([incorrect, correct]) => {
+      const regex = new RegExp(`\\b${incorrect}\\b`, "gi");
+      corrected = corrected.replace(regex, correct);
+    });
+  }
+
+  return corrected;
+}
+
 export interface ProcessedTranscript {
   summary: string;
   tasks: Task[];
@@ -64,7 +109,8 @@ Rules:
  * Process a raw transcript with AI
  */
 export async function processTranscript(
-  rawTranscript: string
+  rawTranscript: string,
+  customEntities?: CustomEntities | null
 ): Promise<ProcessedTranscript | null> {
   // Skip if AI not configured
   if (!process.env.OPENAI_API_KEY) {
@@ -72,9 +118,16 @@ export async function processTranscript(
     return null;
   }
 
+  // Apply custom entity corrections before AI processing
+  const correctedTranscript = applyEntityCorrections(rawTranscript, customEntities || null);
+  
+  if (customEntities) {
+    console.log("[AI] Applied custom entity corrections");
+  }
+
   // Skip very short transcripts to save costs
   const minWords = parseInt(process.env.AI_MIN_WORDS || "20");
-  const wordCount = rawTranscript.trim().split(/\s+/).length;
+  const wordCount = correctedTranscript.trim().split(/\s+/).length;
   
   if (wordCount < minWords) {
     console.log(`[AI] Transcript too short (${wordCount} words), skipping AI processing`);
@@ -90,7 +143,7 @@ export async function processTranscript(
         { role: "system", content: SYSTEM_PROMPT },
         { 
           role: "user", 
-          content: USER_PROMPT_TEMPLATE.replace("{transcript}", rawTranscript)
+          content: USER_PROMPT_TEMPLATE.replace("{transcript}", correctedTranscript)
         },
       ],
       response_format: { type: "json_object" },

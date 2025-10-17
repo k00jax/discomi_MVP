@@ -429,7 +429,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           
           // AI processing (if enabled)
           const aiEnabled = String(process.env.AI_PROCESSING_ENABLED || "true").toLowerCase() === "true";
-          const aiProcessed = aiEnabled ? await processTranscript(combinedText) : null;
+          
+          // Load custom entities from user config
+          const customEntities = cfg.custom_entities || null;
+          
+          const aiProcessed = aiEnabled ? await processTranscript(combinedText, customEntities) : null;
           
           // Build Discord payload with AI enhancements or fallback to raw
           let discordPayload;
