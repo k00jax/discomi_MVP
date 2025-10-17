@@ -1,0 +1,30 @@
+=== CORRECTED DEVELOPER SETTINGS URL ===
+
+**The Issue:**
+Your previous URL was missing the `uid` parameter!
+You used: ?token=u_a228ec0af0...
+But the code needs BOTH token AND uid.
+
+**Corrected URL for Developer Settings:**
+https://discomi-mvp-ochre.vercel.app/api/webhook?token=u_a228ec0af0ae258b3f15a1a4e89c48952a6f4abb30d7c613&uid=W7xTEw3Yjde3XSbUyS0ZSNlcb852
+
+**Why both parameters are needed:**
+1. `uid=W7xTEw3Yjde3XSbUyS0ZSNlcb852` - Tells the webhook which user's Discord webhook to look up
+2. `token=u_a228ec0af0...` - Authenticates that you're allowed to post as this user
+
+**The code flow:**
+Step 1: Extract uid from query string (line 284-231)
+Step 2: Look up user config by uid in database (line 320-325)
+Step 3: If not Omi-signed, verify token matches (line 328-332)
+
+You were failing at Step 1 because no uid was provided!
+
+**Alternative: Use app token instead (simpler):**
+https://discomi-mvp-ochre.vercel.app/api/webhook?app=app_9d7c3b2f4e8a1c6d0f2a5b9e3c7d1a4f8b2e6c0d3a7f1b5e9c4d2a8f0b6e3c1&uid=W7xTEw3Yjde3XSbUyS0ZSNlcb852
+
+This uses the app token (which never changes) plus your uid.
+
+**For app store submission:**
+https://discomi-mvp-ochre.vercel.app/api/webhook?app=app_9d7c3b2f4e8a1c6d0f2a5b9e3c7d1a4f8b2e6c0d3a7f1b5e9c4d2a8f0b6e3c1
+
+Omi automatically appends &uid=... for each user who installs the app.

@@ -319,8 +319,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       .eq("uid", uid)
       .single<UserConfig>();
 
-    if (error) return res.status(500).send("db_error");
-    if (!cfg) return res.status(403).send("setup_required");
+    if (error) {
+      console.error("[DiscOmi] Database error for uid:", uid, "error:", JSON.stringify(error));
+      return res.status(500).send("db_error");
+    }
+    if (!cfg) {
+      console.error("[DiscOmi] No config found for uid:", uid);
+      return res.status(403).send("setup_required");
+    }
 
     // If NOT an Omi-signed request, enforce per-user token for manual tests
     if (!signed) {

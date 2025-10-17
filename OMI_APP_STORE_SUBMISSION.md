@@ -17,6 +17,8 @@ DiscOmi
 https://discomi-mvp-ochre.vercel.app/api/webhook?app=app_9d7c3b2f4e8a1c6d0f2a5b9e3c7d1a4f8b2e6c0d3a7f1b5e9c4d2a8f0b6e3c1
 ```
 
+**IMPORTANT**: Use the ACTUAL token shown above, not a placeholder like `APP_TOKEN`. This is your app-level authentication token that Omi includes when calling your webhook.
+
 **Note**: Omi will automatically append `&uid=USER_UID` when calling this webhook for each user.
 
 ### 3. Setup Completed URL (Optional but Recommended)
