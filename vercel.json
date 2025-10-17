@@ -1,7 +1,7 @@
 {
   "crons": [
     {
-      "path": "/api/cron-post-transcripts?token=CRON_TOKEN_HERE",
+      "path": "/api/cron-post-transcripts?token=512f94fe-9d98-49e7-abba-668004cdf8bf",
       "schedule": "*/1 * * * *"
     }
   ]
