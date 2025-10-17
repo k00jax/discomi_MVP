@@ -19,7 +19,7 @@ export default function Setup() {
     setStatus("idle");
     
     // Parse name corrections from textarea (format: "wrong → correct" per line)
-    const customEntities: any = {};
+    const customEntities: { names?: Record<string, string> } = {};
     if (nameCorrections.trim()) {
       const names: Record<string, string> = {};
       nameCorrections.split("\n").forEach(line => {
