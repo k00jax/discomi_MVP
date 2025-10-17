@@ -192,8 +192,13 @@ function toDiscordPayloadOmi(rawBody: unknown, uid?: string) {
 // Helper to extract uid from query, headers, or body (forgiving for store-installed apps)
 function pickUidLoose(req: NextApiRequest, body: unknown): string | undefined {
   // 1) Query string (developer webhook or templated URL)
-  const q = (req.query.uid as string | undefined) || (req.query.user_id as string | undefined);
-  if (q && String(q).trim()) return String(q).trim();
+  // Handle case where uid appears multiple times (Next.js makes it an array)
+  let q = req.query.uid || req.query.user_id;
+  if (Array.isArray(q)) {
+    console.log("[DiscOmi] WARNING: uid parameter appears multiple times in URL, using first value");
+    q = q[0]; // Take first occurrence
+  }
+  if (q && typeof q === "string" && q.trim()) return q.trim();
 
   // 2) Common headers some platforms set
   const hx = (req.headers["x-omi-user-id"] as string | undefined)
