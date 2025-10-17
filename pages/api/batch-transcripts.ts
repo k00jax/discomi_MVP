@@ -31,24 +31,42 @@ interface TranscriptSession {
 /**
  * Find or create an active session for a user
  * Returns the most recent unposted session, or creates a new one
+ * Automatically creates new session if last activity was > SESSION_IDLE_TIMEOUT ago
  */
 export async function findOrCreateActiveSession(uid: string): Promise<string> {
+  // Session idle timeout: create new session if no activity for this long (default 1 hour)
+  const SESSION_IDLE_TIMEOUT_MINUTES = parseInt(process.env.SESSION_IDLE_TIMEOUT_MINUTES || "60");
+  const idleThreshold = new Date(Date.now() - SESSION_IDLE_TIMEOUT_MINUTES * 60 * 1000).toISOString();
+  
   // Look for most recent unposted session for this user
   const { data: existing } = await supabaseAdmin
     .from("transcript_sessions")
-    .select("session_id")
+    .select("session_id, last_segment_at")
     .eq("uid", uid)
     .eq("posted", false)
     .order("last_segment_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
-  if (existing) {
+  // If existing session and recent activity, reuse it
+  if (existing && existing.last_segment_at > idleThreshold) {
+    console.log(`[Batching] Reusing active session ${existing.session_id}`);
     return existing.session_id;
+  }
+  
+  // If existing session is too old, mark it as abandoned and create new one
+  if (existing && existing.last_segment_at <= idleThreshold) {
+    console.log(`[Batching] Session ${existing.session_id} idle for >${SESSION_IDLE_TIMEOUT_MINUTES}min, creating new session`);
+    // Mark old session as posted (abandoned) so it doesn't accumulate forever
+    await supabaseAdmin
+      .from("transcript_sessions")
+      .update({ posted: true, posted_at: new Date().toISOString() })
+      .eq("session_id", existing.session_id);
   }
 
   // Create new session ID: uid + timestamp
   const sessionId = `${uid}_${Date.now()}`;
+  console.log(`[Batching] Created new session ${sessionId}`);
   return sessionId;
 }
 
@@ -73,6 +91,15 @@ export async function addSegmentToSession(
     const hasStoreKeyword = STORE_KEYWORDS.some((keyword) => segmentText.includes(keyword));
 
     if (existing) {
+      // Check segment count limit (prevent runaway sessions)
+      const MAX_SEGMENTS = parseInt(process.env.MAX_SEGMENTS_PER_SESSION || "200");
+      
+      if (existing.segments.length >= MAX_SEGMENTS) {
+        console.warn(`[Batching] Session ${sessionId} hit max segments (${MAX_SEGMENTS}), auto-posting`);
+        // Auto-post when hitting limit
+        return { shouldPost: true, session: existing };
+      }
+      
       // Append segment to existing session
       const updatedSegments = [...existing.segments, segment];
       
