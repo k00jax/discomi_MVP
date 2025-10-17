@@ -375,6 +375,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (process.env.DEBUG === "true") {
       console.log("[DiscOmi] Full payload:", JSON.stringify(bodyUnknown, null, 2));
     }
+    
+    // Special logging for Transcript Processed to analyze batching
+    const b = asRec(bodyUnknown);
+    if (b["session_id"] && Array.isArray(b["segments"])) {
+      const segments = b["segments"] as unknown[];
+      console.log("[DiscOmi] Transcript session:", b["session_id"], "| segments count:", segments.length, "| all keys:", Object.keys(b).join(","));
+      if (segments.length > 0) {
+        const firstSeg = asRec(segments[0]);
+        const lastSeg = asRec(segments[segments.length - 1]);
+        console.log("[DiscOmi] First segment keys:", Object.keys(firstSeg).join(","));
+        console.log("[DiscOmi] Last segment keys:", Object.keys(lastSeg).join(","));
+      }
+    }
 
     // Build Discord payload with uid
     const discordPayload = toDiscordPayloadOmi(bodyUnknown, uid);
