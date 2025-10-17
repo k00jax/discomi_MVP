@@ -71,8 +71,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(404).send("uid_not_found");
       }
 
-      const options = current.options as Record<string, any> | null;
-      const backupUrl = options?.disabled_webhook_backup;
+      const options = current.options as Record<string, unknown> | null;
+      const backupUrl = typeof options?.disabled_webhook_backup === "string" 
+        ? options.disabled_webhook_backup 
+        : undefined;
 
       if (!backupUrl) {
         return res.status(400).send("no_backup_found");
