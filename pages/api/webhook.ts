@@ -109,6 +109,30 @@ type Structured = { title?: string; overview?: string };
 function extractFromOmiMemory(body: unknown) {
   const b = asRec(body);
 
+  // Detect if this is "Transcript Processed" format (real-time) vs "Conversation Creation" (complete memory)
+  const isTranscriptProcessed = b["session_id"] && Array.isArray(b["segments"]);
+
+  if (isTranscriptProcessed) {
+    // Handle "Transcript Processed" payload: { session_id, segments: [{ text, speaker, ... }] }
+    const sessionId = str(b["session_id"]) || "unknown";
+    const segments = (Array.isArray(b["segments"]) ? b["segments"] : []).map((x) => asRec(x) as Seg);
+    
+    const bodyText = segments
+      .map((s) => str(s.text) || "")
+      .filter(Boolean)
+      .join(" ");
+
+    return {
+      id: sessionId,
+      title: "🎙️ Live Transcript",
+      body: bodyText || "(recording in progress...)",
+      created_at: new Date().toISOString(),
+      category: "default",
+      isRealtime: true,
+    };
+  }
+
+  // Handle "Conversation Creation" payload (full memory object)
   const structured = asRec(b["structured"]) as Structured;
   const segments = (Array.isArray(b["transcript_segments"])
     ? (b["transcript_segments"] as unknown[])
@@ -154,21 +178,24 @@ function extractFromOmiMemory(body: unknown) {
     body: bodyText || "(no text)",
     created_at,
     category,
+    isRealtime: false,
   };
 }
 
 function toDiscordPayloadOmi(rawBody: unknown, uid?: string) {
-  const { id, title, body, created_at, category } = extractFromOmiMemory(rawBody);
+  const { id, title, body, created_at, category, isRealtime } = extractFromOmiMemory(rawBody);
 
   const cat = (category || "default").toLowerCase();
   const emoji = CAT_EMOJI[cat] || CAT_EMOJI.default;
-  const color = CAT_COLOR[cat] || CAT_COLOR.default;
+  const color = isRealtime ? 0xf39c12 : (CAT_COLOR[cat] || CAT_COLOR.default); // Orange for realtime
 
   const limit = process.env.POST_FULL_TEXT === "true" ? 1900 : 900;
   const desc = clamp(body, limit);
 
   const DEBUG = String(process.env.DEBUG || "").toLowerCase() === "true";
-  const footerText = `Conversation • ${id}${DEBUG && uid ? ` • uid:${uid}` : ""}`;
+  const footerText = isRealtime 
+    ? `Live Transcript • ${id}${DEBUG && uid ? ` • uid:${uid}` : ""}`
+    : `Conversation • ${id}${DEBUG && uid ? ` • uid:${uid}` : ""}`;
 
   return {
     username: BOT_NAME,
