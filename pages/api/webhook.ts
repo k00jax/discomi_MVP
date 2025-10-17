@@ -4,6 +4,7 @@ import { Readable } from "stream";
 import { supabaseAdmin } from "../../lib/supabase";
 import type { UserConfig } from "../../types";
 import { addSegmentToSession, markSessionPosted } from "./batch-transcripts";
+import { processTranscript } from "../../lib/ai-processor";
 
 // ---------- Next config: read raw bytes ourselves ----------
 export const config = { api: { bodyParser: false } };
@@ -11,7 +12,7 @@ const BUILD_ID = process.env.BUILD_ID || "batched-v1";
 
 // ---------- ENV ----------
 const OMI_SIGNING_SECRET = process.env.OMI_SIGNING_SECRET || "";
-const BATCH_TRANSCRIPTS = String(process.env.TRANSCRIPT_BATCH_ENABLED || "false").toLowerCase() === "true";
+const BATCH_TRANSCRIPTS = String(process.env.TRANSCRIPT_BATCH_ENABLED || "true").toLowerCase() === "true";
 
 // ---------- Branding ----------
 const OMI_ICON = process.env.NEXT_PUBLIC_OMI_ICON_URL || "https://i.imgur.com/6WZ1Q8j.png";
@@ -24,7 +25,10 @@ const CAT_EMOJI: Record<string, string> = {
   work: "💼", 
   meeting: "📅", 
   task: "✅", 
-  idea: "💡", 
+  idea: "💡",
+  brainstorm: "🌟",
+  note: "📝",
+  other: "💬",
   default: "🎧" 
 };
 const CAT_COLOR: Record<string, number> = { 
@@ -32,9 +36,16 @@ const CAT_COLOR: Record<string, number> = {
   work: 0x0984e3, 
   meeting: 0x00b894, 
   task: 0x55efc4, 
-  idea: 0xfdcb6e, 
+  idea: 0xfdcb6e,
+  brainstorm: 0xe17055,
+  note: 0x74b9ff,
+  other: 0x636e72,
   default: 0x8e8e93 
 };
+
+// Helper functions for AI categories
+const getEmojiForCategory = (cat: string) => CAT_EMOJI[cat.toLowerCase()] || CAT_EMOJI.default;
+const getColorForCategory = (cat: string) => CAT_COLOR[cat.toLowerCase()] || CAT_COLOR.default;
 
 // ---------- Typed helpers ----------
 type UnknownRec = Record<string, unknown>;
@@ -409,19 +420,76 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             .filter(Boolean)
             .join(" ");
           
-          // Create a fake "conversation creation" payload for Discord
-          const batchedPayload = {
-            id: sessionId,
-            created_at: session.first_segment_at,
-            structured: {
-              title: "💬 Batched Transcript",
-              overview: combinedText,
-              category: "default",
-            },
-            transcript_segments: session.segments.map((s) => ({ text: s.text })),
-          };
+          // AI processing (if enabled)
+          const aiEnabled = String(process.env.AI_PROCESSING_ENABLED || "true").toLowerCase() === "true";
+          const aiProcessed = aiEnabled ? await processTranscript(combinedText) : null;
           
-          const discordPayload = toDiscordPayloadOmi(batchedPayload, uid);
+          // Build Discord payload with AI enhancements or fallback to raw
+          let discordPayload;
+          
+          if (aiProcessed) {
+            // Use AI-processed data for rich embed
+            const emoji = getEmojiForCategory(aiProcessed.category);
+            const color = getColorForCategory(aiProcessed.category);
+            
+            const fields: Array<{name: string; value: string; inline?: boolean}> = [
+              { name: "📅 When", value: whenBlock(session.first_segment_at), inline: true },
+              { name: "🏷️ Category", value: aiProcessed.category, inline: true },
+            ];
+            
+            // Add tasks if any
+            if (aiProcessed.tasks && aiProcessed.tasks.length > 0) {
+              const taskList = aiProcessed.tasks
+                .map((t) => {
+                  const icon = t.priority === "high" ? "🔴" : t.priority === "medium" ? "🟡" : "🟢";
+                  return `${icon} ${t.text}`;
+                })
+                .join("\n");
+              fields.push({ name: "📋 Tasks", value: taskList });
+            }
+            
+            // Add ideas if any
+            if (aiProcessed.ideas && aiProcessed.ideas.length > 0) {
+              const ideaList = aiProcessed.ideas.map((i) => `💡 ${i}`).join("\n");
+              fields.push({ name: "✨ Key Ideas", value: ideaList });
+            }
+            
+            // Add entities if any
+            if (aiProcessed.key_entities && aiProcessed.key_entities.length > 0) {
+              fields.push({ 
+                name: "🔖 Mentioned", 
+                value: aiProcessed.key_entities.join(", "),
+                inline: true 
+              });
+            }
+            
+            discordPayload = {
+              username: BOT_NAME,
+              avatar_url: BOT_AVATAR,
+              embeds: [{
+                title: `${emoji} ${aiProcessed.category.charAt(0).toUpperCase() + aiProcessed.category.slice(1)} Summary`,
+                description: aiProcessed.summary,
+                color,
+                timestamp: new Date().toISOString(),
+                footer: { text: `Session • ${sessionId}`, icon_url: OMI_ICON },
+                fields,
+              }],
+            };
+          } else {
+            // Fallback to basic batched format (no AI)
+            const batchedPayload = {
+              id: sessionId,
+              created_at: session.first_segment_at,
+              structured: {
+                title: "💬 Batched Transcript",
+                overview: combinedText,
+                category: "default",
+              },
+              transcript_segments: session.segments.map((s) => ({ text: s.text })),
+            };
+            
+            discordPayload = toDiscordPayloadOmi(batchedPayload, uid);
+          }
           
           // Post to Discord
           const r = await fetch(cfg.webhook_url, {
