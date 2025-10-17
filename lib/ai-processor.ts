@@ -9,48 +9,7 @@ const openai = new OpenAI({
 });
 
 export interface CustomEntities {
-  names?: Record<string, string>;
-  companies?: Record<string, string>;
-  places?: Record<string, string>;
-}
-
-/**
- * Apply custom entity corrections to transcript text
- * Replaces misheard names/terms with correct versions
- */
-export function applyEntityCorrections(
-  transcript: string,
-  customEntities: CustomEntities | null
-): string {
-  if (!customEntities) return transcript;
-
-  let corrected = transcript;
-
-  // Apply name corrections (case-insensitive)
-  if (customEntities.names) {
-    Object.entries(customEntities.names).forEach(([incorrect, correct]) => {
-      const regex = new RegExp(`\\b${incorrect}\\b`, "gi");
-      corrected = corrected.replace(regex, correct);
-    });
-  }
-
-  // Apply company name corrections
-  if (customEntities.companies) {
-    Object.entries(customEntities.companies).forEach(([incorrect, correct]) => {
-      const regex = new RegExp(`\\b${incorrect}\\b`, "gi");
-      corrected = corrected.replace(regex, correct);
-    });
-  }
-
-  // Apply place name corrections
-  if (customEntities.places) {
-    Object.entries(customEntities.places).forEach(([incorrect, correct]) => {
-      const regex = new RegExp(`\\b${incorrect}\\b`, "gi");
-      corrected = corrected.replace(regex, correct);
-    });
-  }
-
-  return corrected;
+  important_terms?: string[]; // User-provided list of names/terms to transcribe correctly
 }
 
 export interface ProcessedTranscript {
@@ -118,16 +77,9 @@ export async function processTranscript(
     return null;
   }
 
-  // Apply custom entity corrections before AI processing
-  const correctedTranscript = applyEntityCorrections(rawTranscript, customEntities || null);
-  
-  if (customEntities) {
-    console.log("[AI] Applied custom entity corrections");
-  }
-
   // Skip very short transcripts to save costs
   const minWords = parseInt(process.env.AI_MIN_WORDS || "20");
-  const wordCount = correctedTranscript.trim().split(/\s+/).length;
+  const wordCount = rawTranscript.trim().split(/\s+/).length;
   
   if (wordCount < minWords) {
     console.log(`[AI] Transcript too short (${wordCount} words), skipping AI processing`);
@@ -137,13 +89,23 @@ export async function processTranscript(
   try {
     console.log(`[AI] Processing transcript (${wordCount} words)...`);
     
+    // Build user prompt with optional important terms
+    let userPrompt = USER_PROMPT_TEMPLATE.replace("{transcript}", rawTranscript);
+    
+    // Add important terms as context if provided
+    if (customEntities?.important_terms && customEntities.important_terms.length > 0) {
+      const termsList = customEntities.important_terms.join(", ");
+      userPrompt += `\n\nIMPORTANT: When summarizing, ensure these names/terms are spelled correctly: ${termsList}`;
+      console.log(`[AI] Using ${customEntities.important_terms.length} custom terms as dictionary`);
+    }
+    
     const response = await openai.chat.completions.create({
       model: process.env.OPENAI_MODEL || "gpt-4o-mini",
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { 
           role: "user", 
-          content: USER_PROMPT_TEMPLATE.replace("{transcript}", correctedTranscript)
+          content: userPrompt
         },
       ],
       response_format: { type: "json_object" },

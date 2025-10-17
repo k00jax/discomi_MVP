@@ -1,7 +1,5 @@
 export type CustomEntities = {
-  names?: Record<string, string>;
-  companies?: Record<string, string>;
-  places?: Record<string, string>;
+  important_terms?: string[]; // User-provided list of names/terms to transcribe correctly
 };
 
 export type UserConfig = {

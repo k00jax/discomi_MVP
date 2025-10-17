@@ -18,19 +18,17 @@ export default function Setup() {
     e.preventDefault();
     setStatus("idle");
     
-    // Parse name corrections from textarea (format: "wrong → correct" per line)
-    const customEntities: { names?: Record<string, string> } = {};
+    // Parse important names/terms from textarea (one per line)
+    // These will be used as a dictionary for spell-correction
+    const customEntities: { important_terms?: string[] } = {};
     if (nameCorrections.trim()) {
-      const names: Record<string, string> = {};
-      nameCorrections.split("\n").forEach(line => {
-        const match = line.match(/^(.+?)\s*[→\-–>]\s*(.+)$/);
-        if (match) {
-          const [, incorrect, correct] = match;
-          names[incorrect.trim().toLowerCase()] = correct.trim();
-        }
-      });
-      if (Object.keys(names).length > 0) {
-        customEntities.names = names;
+      const terms = nameCorrections
+        .split("\n")
+        .map(line => line.trim())
+        .filter(line => line.length > 0);
+      
+      if (terms.length > 0) {
+        customEntities.important_terms = terms;
       }
     }
     
@@ -97,13 +95,13 @@ export default function Setup() {
           )}
 
           <div className={s.field}>
-            <label>Custom Name Corrections (optional)</label>
+            <label>Important Names & Terms (optional)</label>
             <p style={{fontSize: "0.9em", color: "#999", marginTop: "0.25rem", marginBottom: "0.5rem"}}>
-              Fix misheard names. One per line: <code style={{background: "#333", padding: "2px 6px", borderRadius: "3px"}}>wrong → correct</code>
+              Add names and terms you want transcribed correctly. One per line. The AI will use these as a reference dictionary.
             </p>
             <textarea
               className={s.input}
-              placeholder={"Caitlyn → Kaitlin\nKatelyn → Kaitlin\nKate → Kaitlin"}
+              placeholder={"Kaitlin\nDiscOmi\nSan Francisco\nTypeScript"}
               value={nameCorrections}
               onChange={e => setNameCorrections(e.target.value)}
               rows={4}

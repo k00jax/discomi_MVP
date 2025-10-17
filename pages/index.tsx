@@ -54,13 +54,13 @@ export default function Home({ build }: Props) {
             borderRadius: 12,
             overflow: "hidden",
             boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
-            aspectRatio: "1 / 1",
+            flexShrink: 0,
           }}
         >
           <img
             src="/discomi.png"
             alt="DiscOmi bot avatar"
-            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            style={{ width: "100%", height: "100%", objectFit: "contain" }}
           />
         </div>
         <div>
@@ -131,8 +131,13 @@ export default function Home({ build }: Props) {
           </li>
           <li>
             Paste your <strong>Discord channel webhook URL</strong> on the{" "}
-            <Link href="/setup"><code>/setup</code></Link> page. We register your account and return
-            your personal Omi webhook automatically.
+            <Link href="/setup"><code>/setup</code></Link> page.
+          </li>
+          <li>
+            (Optional) Add custom names/entities you want transcribed correctly.
+          </li>
+          <li>
+            Click "Register" - your Omi webhook is automatically configured.
           </li>
         </ol>
       </section>
@@ -157,13 +162,14 @@ export default function Home({ build }: Props) {
       </section>
 
       <section style={{ marginTop: 24 }}>
-        <h2 style={{ fontSize: 20, marginBottom: 8 }}>What it does</h2>
+        <h2 style={{ fontSize: 20, marginBottom: 8 }}>Features</h2>
         <ul style={{ marginTop: 0 }}>
-          <li>✔ Per-user Discord webhooks</li>
-          <li>✔ Secure token authentication</li>
-          <li>✔ Extracts titles and overviews from Omi memories</li>
-          <li>✔ No data storage — direct relay only</li>
-          <li>✔ Supabase-backed multi-tenant routing</li>
+          <li>🤖 <strong>AI-Powered Summaries</strong> - GPT-4o-mini generates clean summaries with task extraction</li>
+          <li>💬 <strong>Batched Transcripts</strong> - Say "store memory" to post complete conversations</li>
+          <li>📝 <strong>Custom Entity Library</strong> - Ensure names and terms are transcribed correctly</li>
+          <li>🔒 <strong>Per-User Isolation</strong> - Secure multi-tenant architecture</li>
+          <li>⚡ <strong>Cost Efficient</strong> - ~$0.005 per conversation, 15-minute lookback window</li>
+          <li>🎯 <strong>Smart Categorization</strong> - Automatically detects work, personal, meetings, etc.</li>
         </ul>
       </section>
 
