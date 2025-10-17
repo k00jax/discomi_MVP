@@ -10,5 +10,7 @@ export type UserConfig = {
   options?: {
     includeTranscript?: boolean;
     maxChars?: number;
+    storeKeyword?: string; // Custom keyword to trigger posting (default: "store memory")
+    startKeyword?: string; // Custom keyword to start new session (default: "start memory")
   };
 };

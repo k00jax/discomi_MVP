@@ -405,20 +405,37 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       try {
         // Find or create active session for this user
         const { findOrCreateActiveSession } = await import("./batch-transcripts");
-        const sessionId = await findOrCreateActiveSession(uid);
+        let sessionId = await findOrCreateActiveSession(uid);
         
         console.log("[DiscOmi] Using session:", sessionId);
+        
+        // Get custom keywords from user config
+        const storeKeyword = cfg.options?.storeKeyword || "store memory";
+        const startKeyword = cfg.options?.startKeyword || "start memory";
         
         // Add each segment to the session
         for (const seg of segments) {
           const segment = asRec(seg);
-          const { shouldPost, session } = await addSegmentToSession(sessionId, uid, {
-            text: str(segment.text) || "",
-          timestamp: str(segment.timestamp),
-          speaker: str(segment.speaker),
-        });
+          const { shouldPost, shouldStartNew, session } = await addSegmentToSession(
+            sessionId, 
+            uid, 
+            {
+              text: str(segment.text) || "",
+              timestamp: str(segment.timestamp),
+              speaker: str(segment.speaker),
+            },
+            storeKeyword,
+            startKeyword
+          );
         
-        if (shouldPost && session) {
+          // If "start memory" detected, get new session ID and continue
+          if (shouldStartNew) {
+            sessionId = await findOrCreateActiveSession(uid);
+            console.log("[DiscOmi] Started new session:", sessionId);
+            continue;
+          }
+        
+          if (shouldPost && session) {
           console.log(`[DiscOmi] Posting batched session ${sessionId} with ${session.segments.length} total segments`);
           
           // Apply lookback window to prevent posting hours of old conversation

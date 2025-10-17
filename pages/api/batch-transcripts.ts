@@ -76,9 +76,34 @@ export async function findOrCreateActiveSession(uid: string): Promise<string> {
 export async function addSegmentToSession(
   sessionId: string,
   uid: string,
-  segment: TranscriptSegment
-): Promise<{ shouldPost: boolean; session: TranscriptSession | null }> {
+  segment: TranscriptSegment,
+  storeKeyword?: string,
+  startKeyword?: string
+): Promise<{ shouldPost: boolean; shouldStartNew: boolean; session: TranscriptSession | null }> {
   try {
+    const segmentText = segment.text?.toLowerCase() || "";
+    
+    // Check for custom keywords (or use defaults)
+    const storePhrase = (storeKeyword || "store memory").toLowerCase();
+    const startPhrase = (startKeyword || "start memory").toLowerCase();
+    
+    const hasStoreKeyword = segmentText.includes(storePhrase);
+    const hasStartKeyword = segmentText.includes(startPhrase);
+    
+    // If "start memory" detected, mark old session as posted and signal to create new one
+    if (hasStartKeyword) {
+      console.log(`[Batching] Detected "${startPhrase}" - clearing previous session, starting fresh`);
+      
+      // Mark any existing session as posted (abandoned)
+      await supabaseAdmin
+        .from("transcript_sessions")
+        .update({ posted: true, posted_at: new Date().toISOString() })
+        .eq("session_id", sessionId)
+        .eq("posted", false);
+      
+      return { shouldPost: false, shouldStartNew: true, session: null };
+    }
+    
     // Check if session exists
     const { data: existing } = await supabaseAdmin
       .from("transcript_sessions")
@@ -87,9 +112,6 @@ export async function addSegmentToSession(
       .eq("posted", false)
       .single<TranscriptSession>();
 
-    const segmentText = segment.text?.toLowerCase() || "";
-    const hasStoreKeyword = STORE_KEYWORDS.some((keyword) => segmentText.includes(keyword));
-
     if (existing) {
       // Check segment count limit (prevent runaway sessions)
       const MAX_SEGMENTS = parseInt(process.env.MAX_SEGMENTS_PER_SESSION || "200");
@@ -97,7 +119,7 @@ export async function addSegmentToSession(
       if (existing.segments.length >= MAX_SEGMENTS) {
         console.warn(`[Batching] Session ${sessionId} hit max segments (${MAX_SEGMENTS}), auto-posting`);
         // Auto-post when hitting limit
-        return { shouldPost: true, session: existing };
+        return { shouldPost: true, shouldStartNew: false, session: existing };
       }
       
       // Append segment to existing session
@@ -115,16 +137,16 @@ export async function addSegmentToSession(
 
       if (error) {
         console.error("[Batching] Error updating session:", error);
-        return { shouldPost: false, session: null };
+        return { shouldPost: false, shouldStartNew: false, session: null };
       }
 
       // If user said a store keyword, post immediately
       if (hasStoreKeyword) {
-        console.log(`[Batching] Detected keyword in segment, posting session ${sessionId}`);
-        return { shouldPost: true, session: updated };
+        console.log(`[Batching] Detected "${storePhrase}" keyword, posting session ${sessionId}`);
+        return { shouldPost: true, shouldStartNew: false, session: updated };
       }
 
-      return { shouldPost: false, session: updated };
+      return { shouldPost: false, shouldStartNew: false, session: updated };
     } else {
       // Create new session
       const { data: newSession, error } = await supabaseAdmin
@@ -141,20 +163,20 @@ export async function addSegmentToSession(
 
       if (error) {
         console.error("[Batching] Error creating session:", error);
-        return { shouldPost: false, session: null };
+        return { shouldPost: false, shouldStartNew: false, session: null };
       }
 
       // If first segment has store keyword, post immediately
       if (hasStoreKeyword) {
-        console.log(`[Batching] Detected keyword in first segment, posting session ${sessionId}`);
-        return { shouldPost: true, session: newSession };
+        console.log(`[Batching] Detected "${storePhrase}" in first segment, posting session ${sessionId}`);
+        return { shouldPost: true, shouldStartNew: false, session: newSession };
       }
 
-      return { shouldPost: false, session: newSession };
+      return { shouldPost: false, shouldStartNew: false, session: newSession };
     }
   } catch (error) {
     console.error("[Batching] Error in addSegmentToSession:", error);
-    return { shouldPost: false, session: null };
+    return { shouldPost: false, shouldStartNew: false, session: null };
   }
 }
 

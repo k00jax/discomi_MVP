@@ -37,6 +37,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     options: {
       includeTranscript: Boolean(req.body?.options?.includeTranscript ?? true),
       maxChars: Math.min(Number(req.body?.options?.maxChars ?? 900), 1900),
+      storeKeyword: req.body?.options?.storeKeyword || undefined,
+      startKeyword: req.body?.options?.startKeyword || undefined,
     },
   };
 

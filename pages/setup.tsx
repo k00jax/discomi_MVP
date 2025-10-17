@@ -6,6 +6,8 @@ export default function Setup() {
   const [webhookUrl, setWebhookUrl] = useState("");
   const [status, setStatus] = useState<"idle"|"ok"|"err">("idle");
   const [nameCorrections, setNameCorrections] = useState<string>("");
+  const [storeKeyword, setStoreKeyword] = useState<string>("");
+  const [startKeyword, setStartKeyword] = useState<string>("");
 
   const prefUid = useMemo(() => {
     if (typeof window === "undefined") return "";
@@ -39,6 +41,10 @@ export default function Setup() {
       body: JSON.stringify({ 
         webhookUrl,
         custom_entities: Object.keys(customEntities).length > 0 ? customEntities : undefined,
+        options: {
+          storeKeyword: storeKeyword.trim() || undefined,
+          startKeyword: startKeyword.trim() || undefined,
+        },
       }),
     });
     setStatus(r.ok ? "ok" : "err");
@@ -107,6 +113,35 @@ export default function Setup() {
               rows={4}
               style={{fontFamily: "monospace", fontSize: "0.95em"}}
             />
+          </div>
+
+          <div className={s.field}>
+            <label>Custom Trigger Phrases (optional)</label>
+            <p style={{fontSize: "0.9em", color: "#999", marginTop: "0.25rem", marginBottom: "0.5rem"}}>
+              Customize the voice commands for saving and starting fresh sessions.
+            </p>
+            <div style={{display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px"}}>
+              <div>
+                <label style={{fontSize: "0.85em", color: "#999"}}>Save phrase (default: &quot;store memory&quot;)</label>
+                <input
+                  className={s.input}
+                  placeholder="store memory"
+                  value={storeKeyword}
+                  onChange={e => setStoreKeyword(e.target.value)}
+                  style={{marginTop: "4px"}}
+                />
+              </div>
+              <div>
+                <label style={{fontSize: "0.85em", color: "#999"}}>Start fresh phrase (default: &quot;start memory&quot;)</label>
+                <input
+                  className={s.input}
+                  placeholder="start memory"
+                  value={startKeyword}
+                  onChange={e => setStartKeyword(e.target.value)}
+                  style={{marginTop: "4px"}}
+                />
+              </div>
+            </div>
           </div>
 
           <button className={s.button} type="submit">Register</button>
