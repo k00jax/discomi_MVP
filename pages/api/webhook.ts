@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { Readable } from "stream";
 import { supabaseAdmin } from "../../lib/supabase";
 import type { UserConfig } from "../../types";
+import { addSegmentToSession, markSessionPosted } from "./batch-transcripts";
 
 // ---------- Next config: read raw bytes ourselves ----------
 export const config = { api: { bodyParser: false } };
@@ -10,6 +11,7 @@ const BUILD_ID = process.env.BUILD_ID || "unknown";
 
 // ---------- ENV ----------
 const OMI_SIGNING_SECRET = process.env.OMI_SIGNING_SECRET || "";
+const BATCH_TRANSCRIPTS = String(process.env.TRANSCRIPT_BATCH_ENABLED || "true").toLowerCase() === "true";
 
 // ---------- Branding ----------
 const OMI_ICON = process.env.NEXT_PUBLIC_OMI_ICON_URL || "https://i.imgur.com/6WZ1Q8j.png";
@@ -376,20 +378,72 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       console.log("[DiscOmi] Full payload:", JSON.stringify(bodyUnknown, null, 2));
     }
     
-    // Special logging for Transcript Processed to analyze batching
+    // Special handling for Transcript Processed: batch segments
     const b = asRec(bodyUnknown);
-    if (b["session_id"] && Array.isArray(b["segments"])) {
+    const isTranscriptProcessed = b["session_id"] && Array.isArray(b["segments"]);
+    
+    if (isTranscriptProcessed && BATCH_TRANSCRIPTS) {
+      const sessionId = str(b["session_id"]) || "unknown";
       const segments = b["segments"] as unknown[];
-      console.log("[DiscOmi] Transcript session:", b["session_id"], "| segments count:", segments.length, "| all keys:", Object.keys(b).join(","));
-      if (segments.length > 0) {
-        const firstSeg = asRec(segments[0]);
-        const lastSeg = asRec(segments[segments.length - 1]);
-        console.log("[DiscOmi] First segment keys:", Object.keys(firstSeg).join(","));
-        console.log("[DiscOmi] Last segment keys:", Object.keys(lastSeg).join(","));
+      
+      console.log("[DiscOmi] Transcript session:", sessionId, "| segments count:", segments.length);
+      
+      // Add each segment to the session
+      for (const seg of segments) {
+        const segment = asRec(seg);
+        const { shouldPost, session } = await addSegmentToSession(sessionId, uid, {
+          text: str(segment.text) || "",
+          timestamp: str(segment.timestamp),
+          speaker: str(segment.speaker),
+        });
+        
+        if (shouldPost && session) {
+          console.log(`[DiscOmi] Posting batched session ${sessionId} with ${session.segments.length} segments`);
+          
+          // Combine all segments into one message
+          const combinedText = session.segments
+            .map((s) => s.text)
+            .filter(Boolean)
+            .join(" ");
+          
+          // Create a fake "conversation creation" payload for Discord
+          const batchedPayload = {
+            id: sessionId,
+            created_at: session.first_segment_at,
+            structured: {
+              title: "💬 Batched Transcript",
+              overview: combinedText,
+              category: "default",
+            },
+            transcript_segments: session.segments.map((s) => ({ text: s.text })),
+          };
+          
+          const discordPayload = toDiscordPayloadOmi(batchedPayload, uid);
+          
+          // Post to Discord
+          const r = await fetch(cfg.webhook_url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(discordPayload),
+          });
+          
+          if (r.ok) {
+            await markSessionPosted(sessionId);
+            console.log(`[DiscOmi] Successfully posted batched session ${sessionId}`);
+          } else {
+            const err = await r.text();
+            console.error(`[DiscOmi] Discord error for batched session:`, r.status, err);
+          }
+          
+          return res.status(200).send("ok_batched_posted");
+        }
       }
+      
+      // Segment added to batch, but not ready to post yet
+      return res.status(200).send("ok_batched");
     }
 
-    // Build Discord payload with uid
+    // Build Discord payload with uid (non-batched)
     const discordPayload = toDiscordPayloadOmi(bodyUnknown, uid);
 
     // Debug flag: add extra fields only when DEBUG=true

@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron-post-transcripts?token=CRON_TOKEN_HERE",
+      "schedule": "*/1 * * * *"
+    }
+  ]
+}
