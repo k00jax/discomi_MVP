@@ -430,7 +430,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           let segmentsToPost = session.segments;
           
           // Time-based filter: only segments from last N minutes
-          const recentByTime = session.segments.filter((s, i) => {
+          const recentByTime = session.segments.filter((s) => {
             // Use segment timestamp if available, otherwise use position (newer segments at end)
             const segmentTime = s.timestamp || session.first_segment_at;
             return segmentTime >= lookbackTime;

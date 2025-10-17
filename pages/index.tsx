@@ -134,7 +134,7 @@ export default function Home({ build }: Props) {
             (Optional) Add custom names/entities you want transcribed correctly.
           </li>
           <li>
-            Click "Register" - your Omi webhook is automatically configured.
+            Click &quot;Register&quot; - your Omi webhook is automatically configured.
           </li>
         </ol>
       </section>
@@ -162,7 +162,7 @@ export default function Home({ build }: Props) {
         <h2 style={{ fontSize: 20, marginBottom: 8 }}>Features</h2>
         <ul style={{ marginTop: 0 }}>
           <li>🤖 <strong>AI-Powered Summaries</strong> - GPT-4o-mini generates clean summaries with task extraction</li>
-          <li>💬 <strong>Batched Transcripts</strong> - Say "store memory" to post complete conversations</li>
+          <li>💬 <strong>Batched Transcripts</strong> - Say &quot;store memory&quot; to post complete conversations</li>
           <li>📝 <strong>Custom Entity Library</strong> - Ensure names and terms are transcribed correctly</li>
           <li>🔒 <strong>Per-User Isolation</strong> - Secure multi-tenant architecture</li>
           <li>⚡ <strong>Cost Efficient</strong> - ~$0.005 per conversation, 15-minute lookback window</li>
