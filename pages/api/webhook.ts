@@ -11,7 +11,7 @@ const BUILD_ID = process.env.BUILD_ID || "batched-v1";
 
 // ---------- ENV ----------
 const OMI_SIGNING_SECRET = process.env.OMI_SIGNING_SECRET || "";
-const BATCH_TRANSCRIPTS = String(process.env.TRANSCRIPT_BATCH_ENABLED || "true").toLowerCase() === "true";
+const BATCH_TRANSCRIPTS = String(process.env.TRANSCRIPT_BATCH_ENABLED || "false").toLowerCase() === "true";
 
 // ---------- Branding ----------
 const OMI_ICON = process.env.NEXT_PUBLIC_OMI_ICON_URL || "https://i.imgur.com/6WZ1Q8j.png";
