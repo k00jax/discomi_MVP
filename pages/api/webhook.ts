@@ -287,11 +287,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // This helps with store-installed apps where Omi might not append uid
     if (!uid) {
       try {
+        console.log("[DiscOmi] No UID found, trying single-user fallback...");
         const { data: rows, error } = await supabaseAdmin
           .from("user_configs")
           .select("uid");
         
-        if (!error && rows && rows.length === 1) {
+        if (error) {
+          console.error("[DiscOmi] Fallback query error:", error);
+        } else if (!rows || rows.length === 0) {
+          console.log("[DiscOmi] Fallback: No users found in database");
+        } else if (rows.length > 1) {
+          console.log("[DiscOmi] Fallback: Multiple users found, cannot auto-select");
+        } else {
           uid = rows[0].uid;
           console.log("[DiscOmi] Single-user fallback: using uid", uid);
         }
