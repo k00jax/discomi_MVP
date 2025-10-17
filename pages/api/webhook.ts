@@ -7,7 +7,7 @@ import { addSegmentToSession, markSessionPosted } from "./batch-transcripts";
 
 // ---------- Next config: read raw bytes ourselves ----------
 export const config = { api: { bodyParser: false } };
-const BUILD_ID = process.env.BUILD_ID || "unknown";
+const BUILD_ID = process.env.BUILD_ID || "batched-v1";
 
 // ---------- ENV ----------
 const OMI_SIGNING_SECRET = process.env.OMI_SIGNING_SECRET || "";
