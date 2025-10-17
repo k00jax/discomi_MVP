@@ -558,6 +558,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           if (r.ok) {
             await markSessionPosted(sessionId);
             console.log(`[DiscOmi] Successfully posted batched session ${sessionId}`);
+            // Next webhook call will create new session automatically (this one is now posted=true)
           } else {
             const err = await r.text();
             console.error(`[DiscOmi] Discord error for batched session:`, r.status, err);
