@@ -97,7 +97,7 @@ export default function Setup() {
           <div className={s.field}>
             <label>Important Names & Terms (optional)</label>
             <p style={{fontSize: "0.9em", color: "#999", marginTop: "0.25rem", marginBottom: "0.5rem"}}>
-              Add names and terms you want transcribed correctly. One per line. "DiscOmi" is included by default.
+              Add names and terms you want transcribed correctly. One per line. &quot;DiscOmi&quot; is included by default.
             </p>
             <textarea
               className={s.input}
