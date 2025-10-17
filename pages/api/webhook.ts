@@ -190,7 +190,7 @@ function toDiscordPayloadOmi(rawBody: unknown, uid?: string) {
 }
 
 // Helper to extract uid from query, headers, or body (forgiving for store-installed apps)
-function pickUidLoose(req: NextApiRequest, body: any): string | undefined {
+function pickUidLoose(req: NextApiRequest, body: unknown): string | undefined {
   // 1) Query string (developer webhook or templated URL)
   const q = (req.query.uid as string | undefined) || (req.query.user_id as string | undefined);
   if (q && String(q).trim()) return String(q).trim();
