@@ -1,5 +1,7 @@
 ﻿import type { GetServerSideProps } from "next";
 import Link from "next/link";
+import { useRouter } from "next/router";
+import { useEffect, useState } from "react";
 
 type Props = { build: string };
 
@@ -8,6 +10,32 @@ export const getServerSideProps: GetServerSideProps<Props> = async () => {
 };
 
 export default function Home({ build }: Props) {
+  const router = useRouter();
+  const [uid, setUid] = useState<string | null>(null);
+  const [isSetup, setIsSetup] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    // Check if uid is in query params (when opened from Omi)
+    const uidParam = router.query.uid as string | undefined;
+    if (uidParam) {
+      setUid(uidParam);
+      
+      // Check setup status
+      fetch(`/api/setup-complete?uid=${uidParam}`)
+        .then(res => res.json())
+        .then(data => setIsSetup(data.is_setup_completed))
+        .catch(() => setIsSetup(false));
+    }
+  }, [router.query.uid]);
+
+  const handleSetup = () => {
+    if (uid) {
+      router.push(`/setup?uid=${uid}`);
+    } else {
+      router.push('/setup');
+    }
+  };
+
   return (
     <main
       style={{
@@ -42,6 +70,58 @@ export default function Home({ build }: Props) {
           </p>
         </div>
       </header>
+
+      {/* Setup Status Badge (shown when opened from Omi) */}
+      {uid && isSetup !== null && (
+        <div
+          style={{
+            marginTop: 24,
+            padding: 16,
+            borderRadius: 8,
+            backgroundColor: isSetup ? "#d4edda" : "#fff3cd",
+            border: `1px solid ${isSetup ? "#c3e6cb" : "#ffeeba"}`,
+            color: isSetup ? "#155724" : "#856404",
+          }}
+        >
+          {isSetup ? (
+            <>
+              <strong>✅ Connected to Discord</strong>
+              <p style={{ margin: "8px 0 0 0", fontSize: 14 }}>
+                Your Omi memories are being posted to your Discord channel.
+              </p>
+            </>
+          ) : (
+            <>
+              <strong>⚠️ Setup Required</strong>
+              <p style={{ margin: "8px 0 0 0", fontSize: 14 }}>
+                You need to connect your Discord webhook to start receiving memories.
+              </p>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Setup Button */}
+      {uid && (
+        <div style={{ marginTop: 24, textAlign: "center" }}>
+          <button
+            onClick={handleSetup}
+            style={{
+              padding: "12px 32px",
+              fontSize: 16,
+              fontWeight: 600,
+              color: "#fff",
+              backgroundColor: isSetup ? "#6c757d" : "#4e7cff",
+              border: "none",
+              borderRadius: 8,
+              cursor: "pointer",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+            }}
+          >
+            {isSetup ? "Change Discord Channel" : "Setup DiscOmi"}
+          </button>
+        </div>
+      )}
 
       <section style={{ marginTop: 24 }}>
         <h2 style={{ fontSize: 20, marginBottom: 8 }}>Install & Setup</h2>
