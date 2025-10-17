@@ -97,11 +97,11 @@ export default function Setup() {
           <div className={s.field}>
             <label>Important Names & Terms (optional)</label>
             <p style={{fontSize: "0.9em", color: "#999", marginTop: "0.25rem", marginBottom: "0.5rem"}}>
-              Add names and terms you want transcribed correctly. One per line. The AI will use these as a reference dictionary.
+              Add names and terms you want transcribed correctly. One per line. "DiscOmi" is included by default.
             </p>
             <textarea
               className={s.input}
-              placeholder={"Kaitlin\nDiscOmi\nSan Francisco\nTypeScript"}
+              placeholder={"Kaitlin\nSan Francisco\nYour Company Name"}
               value={nameCorrections}
               onChange={e => setNameCorrections(e.target.value)}
               rows={4}

@@ -20,11 +20,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // Generate per-user token for fallback/manual tests
   const token = "u_" + crypto.randomBytes(24).toString("hex");
 
+  // Add default DiscOmi term if user doesn't provide custom entities
+  let customEntities = req.body?.custom_entities;
+  if (!customEntities || !customEntities.important_terms || customEntities.important_terms.length === 0) {
+    customEntities = { important_terms: ["DiscOmi"] };
+  } else if (!customEntities.important_terms.includes("DiscOmi")) {
+    // Add DiscOmi to user's list if not already there
+    customEntities.important_terms = [...customEntities.important_terms, "DiscOmi"];
+  }
+
   const upsert: UserConfig = {
     uid: String(uid),
     webhook_url: String(webhookUrl),
     token,
-    custom_entities: req.body?.custom_entities || undefined,
+    custom_entities: customEntities,
     options: {
       includeTranscript: Boolean(req.body?.options?.includeTranscript ?? true),
       maxChars: Math.min(Number(req.body?.options?.maxChars ?? 900), 1900),

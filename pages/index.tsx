@@ -46,27 +46,24 @@ export default function Home({ build }: Props) {
         margin: "0 auto",
       }}
     >
-      <header style={{ display: "flex", alignItems: "center", gap: 16 }}>
-        <div
-          style={{
-            width: 64,
-            height: 64,
+      <header style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24 }}>
+        <img
+          src="/discomi.png"
+          alt="DiscOmi"
+          style={{ 
+            width: 80, 
+            height: 80, 
             borderRadius: 12,
-            overflow: "hidden",
             boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
             flexShrink: 0,
+            objectFit: "contain",
+            backgroundColor: "#fff"
           }}
-        >
-          <img
-            src="/discomi.png"
-            alt="DiscOmi bot avatar"
-            style={{ width: "100%", height: "100%", objectFit: "contain" }}
-          />
-        </div>
+        />
         <div>
-          <h1 style={{ margin: 0, fontSize: 32 }}>DiscOmi</h1>
-          <p style={{ margin: "6px 0 0 0", color: "#555" }}>
-            Posts your Omi memories to your Discord channel. Per-user token. Nothing stored.
+          <h1 style={{ margin: 0, fontSize: 32, fontWeight: 600 }}>DiscOmi</h1>
+          <p style={{ margin: "6px 0 0 0", color: "#666", fontSize: 15 }}>
+            AI-powered conversation summaries posted to your Discord channel
           </p>
         </div>
       </header>
