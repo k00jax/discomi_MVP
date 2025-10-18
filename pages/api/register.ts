@@ -12,8 +12,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const uid = uidQ || uidB || "";
   const webhookUrl = String(req.body?.webhookUrl || "");
 
-  if (!uid) return res.status(400).send("missing_uid");
+  console.log("[register] UID:", uid);
+  console.log("[register] Webhook URL:", webhookUrl);
+  console.log("[register] Request body:", JSON.stringify(req.body, null, 2));
+
+  if (!uid) {
+    console.error("[register] Missing UID");
+    return res.status(400).send("missing_uid");
+  }
   if (!/^https:\/\/discord\.com\/api\/webhooks\//.test(webhookUrl)) {
+    console.error("[register] Invalid webhook URL format:", webhookUrl);
     return res.status(400).send("invalid_webhook_url");
   }
 
@@ -48,7 +56,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     .select("webhook_url, token")
     .single();
 
-  if (error) return res.status(500).send("db_error");
+  if (error) {
+    console.error("[register] Database error:", error);
+    return res.status(500).send("db_error");
+  }
+
+  console.log("[register] Successfully saved config for UID:", uid);
 
   // Return the ready-to-use webhook URL with app token
   const appToken = process.env.APP_WEBHOOK_TOKEN || "";
